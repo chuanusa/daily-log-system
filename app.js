@@ -7,37 +7,52 @@ const google = {
   script: {
     run: new Proxy({}, {
       get: function (target, prop) {
+        // 如果請求的是我們自定義的方法，直接回傳
+        if (prop === 'withSuccessHandler' || prop === 'withFailureHandler' || prop === 'successHandler' || prop === 'failureHandler') {
+          return undefined; // 不應該直接存取這些
+        }
+
         return function (...args) {
           const handlerObj = {
             successHandler: null,
             failureHandler: null,
             withSuccessHandler: function (callback) {
               this.successHandler = callback;
-              return this;
+              // 回傳一個 Proxy 來攔截後續的方法呼叫（即真正的 GAS 函數）
+              return new Proxy(this, {
+                get: (target, nextProp) => {
+                  if (nextProp === 'withFailureHandler') return target.withFailureHandler.bind(target);
+                  return (...nextArgs) => target.execute(nextProp, nextArgs);
+                }
+              });
             },
             withFailureHandler: function (callback) {
               this.failureHandler = callback;
-              return this;
+              // 回傳一個 Proxy 來攔截後續的方法呼叫
+              return new Proxy(this, {
+                get: (target, nextProp) => {
+                  if (nextProp === 'withSuccessHandler') return target.withSuccessHandler.bind(target);
+                  return (...nextArgs) => target.execute(nextProp, nextArgs);
+                }
+              });
             },
-            execute: async function () {
+            execute: async function (actionName, actionArgs) {
               try {
-                console.log(`發送 API 請求：${prop}`, args);
+                console.log(`發送 API 請求：${actionName}`, actionArgs);
 
-                // 將資料以 plain text 發送，避免引發 OPTIONS 預檢請求
                 const response = await fetch(API_URL, {
                   method: 'POST',
                   body: JSON.stringify({
-                    action: prop,
-                    args: args
+                    action: actionName,
+                    args: actionArgs
                   })
                 });
 
                 const result = await response.json();
-                console.log(`收到 API 回應：${prop}`, result);
+                console.log(`收到 API 回應：${actionName}`, result);
 
                 if (result.status === 'success') {
                   if (this.successHandler) {
-                    // 為了相容原本 GAS 傳回來的結構
                     this.successHandler(result.data);
                   }
                 } else {
@@ -51,7 +66,9 @@ const google = {
             }
           };
 
-          setTimeout(() => handlerObj.execute(), 0);
+          // 處理沒有使用 withSuccessHandler / withFailureHandler 直接呼叫的情況
+          // 例如: google.script.run.doSomething()
+          handlerObj.execute(prop, args);
           return handlerObj;
         };
       }
