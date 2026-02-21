@@ -3,63 +3,62 @@
 // ==========================================
 const API_URL = "https://script.google.com/macros/s/AKfycbwDuDK2BYwykf0Z-u2FNFwxqyu0NZbE4emYceSMAIa3oD5JRUB9zIzRHfbVxtHdEzfnlg/exec"; // 請替換為部署後的網址
 
-const google = {
-  script: {
-    run: (function () {
-      // 建立一個可以連鎖呼叫的處理器
-      function createRunner(successHandler, failureHandler) {
-        const handlerObj = {
-          withSuccessHandler: function (callback) {
-            return createRunner(callback, failureHandler);
-          },
-          withFailureHandler: function (callback) {
-            return createRunner(successHandler, callback);
+window.google = window.google || {};
+window.google.script = {
+  run: (function () {
+    // 建立一個可以連鎖呼叫的處理器
+    function createRunner(successHandler, failureHandler) {
+      const handlerObj = {
+        withSuccessHandler: function (callback) {
+          return createRunner(callback, failureHandler);
+        },
+        withFailureHandler: function (callback) {
+          return createRunner(successHandler, callback);
+        }
+      };
+
+      // 使用 Proxy 攔截未知的屬性（即後端函數名稱），例如 .getDailySummaryReport
+      return new Proxy(handlerObj, {
+        get: function (target, prop) {
+          // 如果呼叫的是 withSuccessHandler 或 withFailureHandler，直接回傳
+          if (prop in target) {
+            return target[prop];
           }
-        };
 
-        // 使用 Proxy 攔截未知的屬性（即後端函數名稱），例如 .getDailySummaryReport
-        return new Proxy(handlerObj, {
-          get: function (target, prop) {
-            // 如果呼叫的是 withSuccessHandler 或 withFailureHandler，直接回傳
-            if (prop in target) {
-              return target[prop];
-            }
-
-            // 否則視為呼叫後端 API
-            return function (...args) {
-              console.log(`發送 API 請求：${prop.toString()}`, args);
-              fetch(API_URL, {
-                method: 'POST',
-                body: JSON.stringify({
-                  action: prop,
-                  args: args
-                })
+          // 否則視為呼叫後端 API
+          return function (...args) {
+            console.log(`發送 API 請求：${prop.toString()}`, args);
+            fetch(API_URL, {
+              method: 'POST',
+              body: JSON.stringify({
+                action: prop,
+                args: args
               })
-                .then(res => res.json())
-                .then(result => {
-                  console.log(`收到 API 回應：${prop.toString()}`, result);
-                  if (result.status === 'success') {
-                    if (successHandler) successHandler(result.data);
-                  } else {
-                    if (failureHandler) failureHandler(new Error(result.message));
-                    else console.error("API Error:", result.message);
-                  }
-                })
-                .catch(error => {
-                  if (failureHandler) failureHandler(error);
-                  else console.error("Fetch Error:", error);
-                });
-            };
-          }
-        });
-      }
+            })
+              .then(res => res.json())
+              .then(result => {
+                console.log(`收到 API 回應：${prop.toString()}`, result);
+                if (result.status === 'success') {
+                  if (successHandler) successHandler(result.data);
+                } else {
+                  if (failureHandler) failureHandler(new Error(result.message));
+                  else console.error("API Error:", result.message);
+                }
+              })
+              .catch(error => {
+                if (failureHandler) failureHandler(error);
+                else console.error("Fetch Error:", error);
+              });
+          };
+        }
+      });
+    }
 
-      return createRunner(null, null);
-    })(),
-    host: {
-      close: function () {
-        console.log("google.script.host.close() called");
-      }
+    return createRunner(null, null);
+  })(),
+  host: {
+    close: function () {
+      console.log("google.script.host.close() called");
     }
   }
 };
