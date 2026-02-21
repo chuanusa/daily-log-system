@@ -356,6 +356,62 @@ function checkLoginStatus() {
 
 function showLoginInterface() {
   document.getElementById('loginModal').style.display = 'flex';
+  initGoogleSignIn();
+}
+
+function initGoogleSignIn() {
+  if (window.google && google.accounts && google.accounts.id) {
+    google.accounts.id.initialize({
+      client_id: "62340397596-cd3pfo4me39v4rgmq96iaknter75lga9.apps.googleusercontent.com",
+      callback: handleCredentialResponse
+    });
+    google.accounts.id.renderButton(
+      document.getElementById("googleSignInButton"),
+      { theme: "outline", size: "large", width: "100%", text: "signin_with" }
+    );
+  } else {
+    setTimeout(initGoogleSignIn, 500); // Wait for external script to load
+  }
+}
+
+function decodeJwtResponse(token) {
+  var base64Url = token.split('.')[1];
+  var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+  var jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function (c) {
+    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+  }).join(''));
+  return JSON.parse(jsonPayload);
+}
+
+function handleCredentialResponse(response) {
+  const responsePayload = decodeJwtResponse(response.credential);
+  const email = responsePayload.email;
+
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function (result) {
+      hideLoading();
+      if (result.success) {
+        currentUserInfo = result.user;
+        isGuestMode = false;
+        hideLoginInterface();
+        updateUIForLoggedIn();
+        showToast(result.message);
+        setTimeout(() => {
+          loadInitialData();
+          if (currentUserInfo.role === '填表人') {
+            checkFillerReminders();
+          }
+        }, 500);
+      } else {
+        showToast(result.message, true);
+      }
+    })
+    .withFailureHandler(function (error) {
+      hideLoading();
+      showToast('Google 登入失敗：' + error.message, true);
+    })
+    .authenticateGoogleUser(email);
 }
 
 function hideLoginInterface() {

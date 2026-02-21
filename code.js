@@ -214,12 +214,12 @@ function doPost(e) {
     } else if (e.parameter && e.parameter.data) {
       postData = JSON.parse(e.parameter.data);
     }
-    
+
     const action = postData.action;
     const args = postData.args || [];
-    
+
     const globalObj = this;
-    
+
     if (typeof globalObj[action] === 'function') {
       const result = globalObj[action].apply(globalObj, args);
       return ContentService.createTextOutput(JSON.stringify({
@@ -308,6 +308,79 @@ function getUserRole() {
 
 function validateUserPermission(email, projectSeqNo) {
   return true;
+}
+
+// ============================================
+// Google 登入驗證
+// ============================================
+function authenticateGoogleUser(email) {
+  try {
+    const fillerSheet = getSheet(CONFIG.SHEET_NAMES.FILLERS);
+    const data = fillerSheet.getDataRange().getValues();
+    const cols = CONFIG.FILLER_COLS;
+
+    Logger.log('=== Google 登入驗證開始 ===');
+    Logger.log('Google 信箱: ' + email);
+
+    // 從第2行開始（第1行是標題）
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+
+      // 讀取D欄（信箱）
+      const rowEmail = row[cols.EMAIL] ? row[cols.EMAIL].toString().trim() : '';
+
+      // 跳過空行
+      if (!rowEmail) continue;
+
+      // 不區分大小寫比對信箱
+      if (rowEmail.toLowerCase() === email.trim().toLowerCase()) {
+        Logger.log('✓ 找到匹配的信箱，自動登入');
+
+        const rowAccount = row[cols.ACCOUNT] ? row[cols.ACCOUNT].toString().trim() : '';
+
+        // 解析管理工程序號為陣列
+        const managedProjectsStr = row[cols.MANAGED_PROJECTS] || '';
+        const managedProjectsArray = managedProjectsStr ?
+          managedProjectsStr.split(',').map(p => p.trim()).filter(p => p) : [];
+
+        // 取得使用者權限
+        const permissions = getUserPermissions(rowEmail);
+
+        const userSession = {
+          isLoggedIn: true,
+          account: rowAccount || '',
+          email: rowEmail,
+          name: row[cols.NAME] || '未命名',
+          role: row[cols.ROLE] || CONFIG.ROLES.FILLER,
+          dept: row[cols.DEPT] || '未分類',
+          managedProjects: managedProjectsArray,
+          supervisorEmail: row[cols.SUPERVISOR_EMAIL] || '',
+          permissions: permissions,
+          loginTime: new Date().toISOString()
+        };
+
+        PropertiesService.getUserProperties().setProperty('userSession', JSON.stringify(userSession));
+
+        return {
+          success: true,
+          message: 'Google 登入成功！歡迎 ' + userSession.name,
+          user: userSession
+        };
+      }
+    }
+
+    Logger.log('✗ 找不到匹配的信箱');
+    return {
+      success: false,
+      message: '找不到此信箱，請確認您是否使用公司信箱，或請管理員將您加入系統'
+    };
+  } catch (error) {
+    Logger.log('authenticateGoogleUser error: ' + error.toString());
+    return {
+      success: false,
+      message: 'Google 登入失敗：' + error.message
+    };
+  }
 }
 
 // ============================================
