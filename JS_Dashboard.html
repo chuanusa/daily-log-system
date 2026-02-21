@@ -1,0 +1,134 @@
+<script>
+    // ============================================
+    // 每月儀表板邏輯 (JS_Dashboard)
+    // ============================================
+
+    let dashboardCharts = {};
+    let dashboardDataDate = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+
+    // 初始化
+    document.addEventListener('DOMContentLoaded', function () {
+        renderDashboardSelectors();
+        document.getElementById('dashYearSelect').addEventListener('change', updateDashboardData);
+        document.getElementById('dashMonthSelect').addEventListener('change', updateDashboardData);
+    });
+
+    // 渲染年份與月份選擇器
+    function renderDashboardSelectors() {
+        const yearSelect = document.getElementById('dashYearSelect');
+        const monthSelect = document.getElementById('dashMonthSelect');
+
+        const currentYear = new Date().getFullYear();
+        yearSelect.innerHTML = '';
+        for (let y = currentYear; y >= currentYear - 2; y--) {
+            const opt = document.createElement('option');
+            opt.value = y;
+            opt.textContent = y + '年';
+            if (y === dashboardDataDate.year) opt.selected = true;
+            yearSelect.appendChild(opt);
+        }
+
+        monthSelect.innerHTML = '';
+        for (let m = 1; m <= 12; m++) {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m + '月';
+            if (m === dashboardDataDate.month) opt.selected = true;
+            monthSelect.appendChild(opt);
+        }
+    }
+
+    function updateDashboardData() {
+        dashboardDataDate.year = parseInt(document.getElementById('dashYearSelect').value);
+        dashboardDataDate.month = parseInt(document.getElementById('dashMonthSelect').value);
+        loadMonthlyDashboard();
+    }
+
+    function loadMonthlyDashboard() {
+        showLoading();
+        // 呼叫後端 getMonthlyDashboardData
+        google.script.run
+            .withSuccessHandler(function (data) {
+                hideLoading();
+                if (data.error) {
+                    showToast('載入失敗: ' + data.error, true);
+                } else {
+                    renderDashboardCharts(data);
+                }
+            })
+            .withFailureHandler(function (error) {
+                hideLoading();
+                showToast('載入儀表板失敗：' + error.message, true);
+            })
+            .getMonthlyDashboardData(dashboardDataDate.year, dashboardDataDate.month);
+    }
+
+    function renderDashboardCharts(data) {
+        if (!document.getElementById('chart-work-days')) return;
+
+        // 1. 各工程出工日數 (Bar Chart)
+        const ctxWork = document.getElementById('chart-work-days');
+
+        if (dashboardCharts.workDays) dashboardCharts.workDays.destroy();
+
+        // 取前 20 名以免太擠
+        const workData = data.workDays.slice(0, 20);
+        const workLabels = workData.map(d => d.name);
+        const workValues = workData.map(d => d.days);
+
+        dashboardCharts.workDays = new Chart(ctxWork, {
+            type: 'bar',
+            data: {
+                labels: workLabels,
+                datasets: [{
+                    label: '本月出工日數 (天)',
+                    data: workValues,
+                    backgroundColor: '#3b82f6',
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                indexAxis: 'y', // 水平長條圖
+                responsive: true,
+                plugins: {
+                    title: { display: true, text: `${data.year}年${data.month}月 各工程出工日數 (Top 20)` },
+                    legend: { display: false }
+                },
+                scales: {
+                    x: { beginAtZero: true, stepSize: 1 }
+                }
+            }
+        });
+
+        // 2. 危害統計 (Bar/Pie Chart)
+        const ctxHazard = document.getElementById('chart-hazards');
+
+        if (dashboardCharts.hazards) dashboardCharts.hazards.destroy();
+
+        const hazardLabels = data.hazards.map(h => h.type);
+        const hazardValues = data.hazards.map(h => h.count);
+
+        dashboardCharts.hazards = new Chart(ctxHazard, {
+            type: 'bar', // 或 'pie'
+            data: {
+                labels: hazardLabels,
+                datasets: [{
+                    label: '出現次數',
+                    data: hazardValues,
+                    backgroundColor: '#ef4444',
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: { display: true, text: `${data.year}年${data.month}月 整體危害統計` },
+                    legend: { display: false }
+                },
+                scales: {
+                    y: { beginAtZero: true, stepSize: 1 }
+                }
+            }
+        });
+    }
+</script>
