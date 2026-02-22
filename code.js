@@ -1311,13 +1311,19 @@ function submitDailyLog(data) {
     const cols = CONFIG.DAILY_LOG_COLS;
 
     if (data.isHolidayNoWork) {
+      // [修正] 從前端提取更詳細的假日事由（例如：[假日不施工] 星期六、星期日）
+      let holidayReason = '🏖️ 假日不施工';
+      if (data.workItems && data.workItems.length > 0 && data.workItems[0].workItem) {
+        holidayReason = data.workItems[0].workItem;
+      }
+
       const row = [];
       row[cols.DATE] = new Date(data.logDate);
       row[cols.PROJECT_SEQ_NO] = data.projectSeqNo;
       row[cols.PROJECT_SHORT_NAME] = data.projectShortName || '';
       row[cols.INSPECTORS] = '';
       row[cols.WORKERS_COUNT] = 0;
-      row[cols.WORK_ITEM] = '假日不施工';
+      row[cols.WORK_ITEM] = holidayReason; // 寫入詳細選填事由
       row[cols.DISASTER_TYPES] = '';
       row[cols.COUNTERMEASURES] = '';
       row[cols.WORK_LOCATION] = '';
@@ -1604,10 +1610,20 @@ function getFillerReminders(managedProjectsStr) {
         });
       }
 
-      // 檢查是否已填寫明日日誌
+      // [修改] 檢查明日是否已填寫日誌 + 智慧跳日檢查
       Logger.log('[getFillerReminders] 檢查工程 ' + seqNo + ' 是否有明日日誌...');
       let hasTomorrowLog = false;
-      let matchCount = 0;
+      let isWeekend = (tomorrow.getDay() === 0 || tomorrow.getDay() === 6); // 判斷明日是否為六、日
+      let hasNextWorkdayLog = false;
+
+      // 如果明日是週末，計算下一個工作日 (通常是星期一)
+      let nextWorkday = new Date(tomorrow);
+      if (tomorrow.getDay() === 6) { // 星期六 -> 加 2 天到星期一
+        nextWorkday.setDate(nextWorkday.getDate() + 2);
+      } else if (tomorrow.getDay() === 0) { // 星期日 -> 加 1 天到星期一
+        nextWorkday.setDate(nextWorkday.getDate() + 1);
+      }
+      const nextWorkdayStr = Utilities.formatDate(nextWorkday, 'GMT+8', 'yyyy-MM-dd');
 
       for (let i = 1; i < logData.length; i++) {
         if (!logData[i][logCols.DATE]) continue;
@@ -1615,25 +1631,33 @@ function getFillerReminders(managedProjectsStr) {
         const logDate = Utilities.formatDate(new Date(logData[i][logCols.DATE]), 'GMT+8', 'yyyy-MM-dd');
         const logSeqNo = logData[i][logCols.PROJECT_SEQ_NO] ? logData[i][logCols.PROJECT_SEQ_NO].toString() : '';
 
-        if (i <= 3) {
-          Logger.log('[getFillerReminders]   日誌第 ' + i + ' 行: 日期="' + logDate + '", 工程序號="' + logSeqNo + '"');
-        }
-
-        if (logDate === tomorrowStr && logSeqNo === seqNo) {
-          hasTomorrowLog = true;
-          matchCount++;
-          Logger.log('[getFillerReminders] ✓ 工程 ' + seqNo + ' 已有明日日誌（第 ' + i + ' 行）');
-          break;
+        if (logSeqNo === seqNo) {
+          if (logDate === tomorrowStr) {
+            hasTomorrowLog = true;
+            Logger.log('[getFillerReminders] ✓ 工程 ' + seqNo + ' 已有明日日誌');
+          }
+          if (isWeekend && logDate === nextWorkdayStr) {
+            hasNextWorkdayLog = true;
+            Logger.log('[getFillerReminders] ✓ 工程 ' + seqNo + ' 已提早填寫下個工作日 (' + nextWorkdayStr + ') 日誌');
+          }
         }
       }
 
+      // [核心判斷邏輯] 
+      // 1. 如果明天沒填寫
+      // 2. 且明天是「週末」
+      // 3. 但「下一個工作日」已經填寫了 -> 代表同仁提早寫好了！放過他！
       if (!hasTomorrowLog) {
-        Logger.log('[getFillerReminders] ✗ 工程 ' + seqNo + ' 未填寫明日日誌');
-        unfilledProjects.push({
-          seqNo: projectInfo.seqNo,
-          fullName: projectInfo.fullName,
-          contractor: projectInfo.contractor
-        });
+        if (isWeekend && hasNextWorkdayLog) {
+          Logger.log('[getFillerReminders] 💡 工程 ' + seqNo + ' 明日為週末且已預填下週本日誌，系統豁免提醒');
+        } else {
+          Logger.log('[getFillerReminders] ✗ 工程 ' + seqNo + ' 未填寫明日日誌');
+          unfilledProjects.push({
+            seqNo: projectInfo.seqNo,
+            fullName: projectInfo.fullName,
+            contractor: projectInfo.contractor
+          });
+        }
       }
     });
 
@@ -3413,23 +3437,47 @@ function sendDailyReminderEmails() {
           return;
         }
 
-        // 檢查是否已填寫明日日誌
+        // [修改] 檢查明日是否已填寫日誌 + 智慧跳日檢查
         let hasTomorrowLog = false;
+        let isWeekend = (tomorrow.getDay() === 0 || tomorrow.getDay() === 6); // 判斷明日是否為六、日
+        let hasNextWorkdayLog = false;
+
+        // 如果明日是週末，計算下一個工作日 (通常是星期一)
+        let nextWorkday = new Date(tomorrow);
+        if (tomorrow.getDay() === 6) { // 星期六 -> 加 2 天到星期一
+          nextWorkday.setDate(nextWorkday.getDate() + 2);
+        } else if (tomorrow.getDay() === 0) { // 星期日 -> 加 1 天到星期一
+          nextWorkday.setDate(nextWorkday.getDate() + 1);
+        }
+        const nextWorkdayStr = Utilities.formatDate(nextWorkday, 'GMT+8', 'yyyy-MM-dd');
+
         for (let k = 1; k < logData.length; k++) {
           if (!logData[k][logCols.DATE]) continue;
 
           const logDate = Utilities.formatDate(new Date(logData[k][logCols.DATE]), 'GMT+8', 'yyyy-MM-dd');
           const logSeqNo = logData[k][logCols.PROJECT_SEQ_NO] ? logData[k][logCols.PROJECT_SEQ_NO].toString() : '';
 
-          if (logDate === tomorrowStr && logSeqNo === seqNo) {
-            hasTomorrowLog = true;
-            break;
+          if (logSeqNo === seqNo) {
+            if (logDate === tomorrowStr) {
+              hasTomorrowLog = true;
+            }
+            if (isWeekend && logDate === nextWorkdayStr) {
+              hasNextWorkdayLog = true;
+            }
           }
         }
 
+        // [核心判斷邏輯] 
+        // 1. 如果明天沒填寫
+        // 2. 且明天是「週末」
+        // 3. 但「下一個工作日」已經填寫了 -> 代表同仁提早寫好了！放過他！
         if (!hasTomorrowLog) {
-          Logger.log('[sendDailyReminderEmails]   ✗ 工程 ' + seqNo + ' (' + projectInfo.fullName + ') 未填寫明日日誌');
-          unfilledProjects.push(projectInfo);
+          if (isWeekend && hasNextWorkdayLog) {
+            Logger.log('[sendDailyReminderEmails] 💡 工程 ' + seqNo + ' 明日為週末且已預填下週本日誌，系統豁免提醒');
+          } else {
+            Logger.log('[sendDailyReminderEmails]   ✗ 工程 ' + seqNo + ' 未填寫明日日誌');
+            unfilledProjects.push(projectInfo);
+          }
         } else {
           Logger.log('[sendDailyReminderEmails]   ✓ 工程 ' + seqNo + ' (' + projectInfo.fullName + ') 已填寫明日日誌');
         }

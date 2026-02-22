@@ -828,15 +828,19 @@ function setupEventListeners() {
   document.getElementById('isHolidayWork').addEventListener('change', function () {
     if (this.checked) {
       document.getElementById('isHolidayNoWork').checked = false;
+      document.getElementById('holidayNoWorkDetails').style.display = 'none'; // [新增] 隱藏細項
       toggleWorkFields(false); // 假日施工：顯示所有欄位
     }
   });
 
   document.getElementById('isHolidayNoWork').addEventListener('change', function () {
+    const detailsDiv = document.getElementById('holidayNoWorkDetails');
     if (this.checked) {
       document.getElementById('isHolidayWork').checked = false;
+      detailsDiv.style.display = 'flex'; // [新增] 展開細項
       toggleWorkFields(true); // 假日不施工：隱藏欄位
     } else {
+      detailsDiv.style.display = 'none'; // [新增] 隱藏細項
       // 取消假日不施工：顯示欄位
       toggleWorkFields(false);
     }
@@ -1777,11 +1781,23 @@ function handleDailyLogSubmit(event) {
 
   // 假日不施工
   if (isHolidayNoWork) {
+    // [修正] 取得假日勾選細節
+    const noWorkDetails = [];
+    if (document.getElementById('checkSatNoWork').checked) noWorkDetails.push('星期六');
+    if (document.getElementById('checkSunNoWork').checked) noWorkDetails.push('星期日');
+    if (document.getElementById('checkHolidayNoWork').checked) noWorkDetails.push('例假');
+
+    // 如果有勾選細項，組合字串；若無則保持預設
+    const noWorkReason = noWorkDetails.length > 0
+      ? `[假日不施工] ${noWorkDetails.join('、')}`
+      : '🏖️ 假日不施工';
+
     const confirmMessage = `
-      <p><strong>🏖️ 假日不施工</strong></p>
+      <p><strong>🏖️ 假日不施工設定</strong></p>
       <p><strong>📅 日期：</strong>${logDate}</p>
       <p><strong>🏗️ 工程：</strong>${document.getElementById('logProjectSelect').selectedOptions[0].text}</p>
-      <p style="margin-top: 1rem; color: var(--info);">確認提交假日不施工記錄嗎？</p>
+      <p style="margin-top: 0.5rem; color: var(--primary);"><strong>包含：</strong>${noWorkDetails.length > 0 ? noWorkDetails.join('、') : '純假日不施工'}</p>
+      <p style="margin-top: 1rem; color: var(--info);">確認提交此記錄嗎？</p>
     `;
 
     showConfirmModal(confirmMessage, function () {
@@ -1791,10 +1807,16 @@ function handleDailyLogSubmit(event) {
         projectSeqNo: projectSeqNo,
         projectShortName: projectShortName,
         isHolidayNoWork: true,
+        // 我們將新的理由注入原本用來存工作的 workItems，這是後端解析字串的地方
         isHolidayWork: false,
         inspectorIds: [],
         workersCount: 0,
-        workItems: []
+        workItems: [{
+          workItem: noWorkReason,
+          disasterTypes: [],
+          countermeasures: '',
+          location: ''
+        }]
       });
       closeConfirmModal();
     });

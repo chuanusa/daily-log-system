@@ -319,6 +319,25 @@
               <input type="checkbox" id="isHolidayNoWork" name="holidayOption">
               <span>🏖️ 假日不施工（停止施工）</span>
             </div>
+
+            <!-- [新增] 假日不施工細項勾選 -->
+            <div id="holidayNoWorkDetails" style="display: none; padding-left: 2rem; margin-top: 0.5rem; gap: 1rem;">
+              <label class="filter-option"
+                style="cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem;">
+                <input type="checkbox" id="checkSatNoWork" value="星期六">
+                <span>六</span>
+              </label>
+              <label class="filter-option"
+                style="cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem;">
+                <input type="checkbox" id="checkSunNoWork" value="星期日">
+                <span>日</span>
+              </label>
+              <label class="filter-option"
+                style="cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem;">
+                <input type="checkbox" id="checkHolidayNoWork" value="例假">
+                <span>例假</span>
+              </label>
+            </div>
           </div>
 
           <!-- 檢驗員選擇 -->
