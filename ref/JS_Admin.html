@@ -1,0 +1,133 @@
+<script>
+    // ============================================
+    // 管理功能邏輯 (JS_Admin)
+    // ============================================
+
+    function setupAdminListeners() {
+        // TBM
+        const tbmBtn = document.getElementById('generateTBMKYBtn');
+        if (tbmBtn) tbmBtn.addEventListener('click', openTBMKYModal);
+
+        // Project Setup
+        const refreshProj = document.getElementById('refreshProjectList');
+        if (refreshProj) refreshProj.addEventListener('click', loadAndRenderProjectCards);
+        const projDeptFilter = document.getElementById('projectDeptFilter');
+        if (projDeptFilter) projDeptFilter.addEventListener('change', loadAndRenderProjectCards);
+
+        // Inspector Mgmt
+        const refreshIns = document.getElementById('refreshInspectorList');
+        if (refreshIns) refreshIns.addEventListener('click', loadInspectorManagement);
+
+        // User Mgmt
+        const refreshUser = document.getElementById('refreshUserList');
+        if (refreshUser) refreshUser.addEventListener('click', loadUserManagement);
+    }
+
+    // ============================================
+    // Project Setup
+    // ============================================
+    function loadAndRenderProjectCards() {
+        // Logic from original...
+        // Ensuring allInspectors is loaded first
+        if (!allInspectors.length) {
+            loadInitialData(); // Which calls loadAndRenderProjectCards if active tab? No, wait.
+            // Just call backend
+            google.script.run.withSuccessHandler(function (ins) {
+                allInspectors = ins;
+                fetchProjects();
+            }).getAllInspectors();
+        } else {
+            fetchProjects();
+        }
+    }
+
+    function fetchProjects() {
+        showLoading();
+        google.script.run.withSuccessHandler(function (projs) {
+            hideLoading();
+            renderProjectCards(projs);
+        }).getAllProjects(); // Check backend function name
+    }
+
+    function renderProjectCards(projects) {
+        const container = document.getElementById('projectCardsContainer');
+        const deptFilter = document.getElementById('projectDeptFilter').value;
+        const statusFilter = document.querySelector('input[name="projectStatusFilter"]:checked').value;
+
+        const filtered = projects.filter(p => {
+            if (deptFilter !== 'all' && p.dept !== deptFilter) return false;
+            // Status filter logic
+            if (statusFilter === 'active' && p.projectStatus !== '施工中') return false;
+            if (statusFilter === 'completed' && p.projectStatus !== '完工') return false;
+            return true;
+        });
+
+        if (!filtered.length) { container.innerHTML = '查無資料'; return; }
+
+        container.innerHTML = filtered.map(p => `
+        <div class="project-card">
+            <div class="project-card-header">
+                <div>${p.shortName}</div>
+                <div class="status-badge status-${p.projectStatus === '施工中' ? 'active' : 'completed'}">${p.projectStatus}</div>
+            </div>
+            <div class="project-card-body">
+                <div>${p.fullName}</div>
+                <div>承攬商: ${p.contractor}</div>
+            </div>
+            <div class="project-card-footer">
+                <button class="btn btn-sm btn-outline-primary" onclick="openEditProjectModal('${p.seqNo}')">編輯</button>
+            </div>
+        </div>
+      `).join('');
+    }
+
+    function openEditProjectModal(seqNo) {
+        // ... implementation
+        document.getElementById('editProjectModal').style.display = 'flex';
+        // Load details
+    }
+
+    // ============================================
+    // Inspector Management
+    // ============================================
+    function loadInspectorManagement() {
+        // ...
+        showLoading();
+        google.script.run.withSuccessHandler(function (data) {
+            hideLoading();
+            renderInspectorTable(data);
+        }).getAllInspectorsWithStatus();
+    }
+
+    function renderInspectorTable(inspectors) {
+        const tbody = document.getElementById('inspectorTableBody');
+        tbody.innerHTML = inspectors.map(ins => `
+        <tr>
+            <td>${ins.dept}</td>
+            <td>${ins.name}</td>
+            <td>${ins.title}</td>
+            <td>${ins.status === 'active' ? '啟用' : '停用'}</td>
+            <td>
+                <button class="btn-mini" onclick="openEditInspectorModal('${ins.id}')">編輯</button>
+            </td>
+        </tr>
+      `).join('');
+    }
+
+    // ============================================
+    // User Management
+    // ============================================
+    function loadUserManagement() {
+        // ...
+        // Assume similar structure
+    }
+
+    // ============================================
+    // TBM-KY
+    // ============================================
+    function openTBMKYModal() {
+        document.getElementById('tbmkyModal').style.display = 'flex';
+        // Set default date
+    }
+
+</script>

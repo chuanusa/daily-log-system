@@ -1,0 +1,148 @@
+<script>
+    // ============================================
+    // 儀表板邏輯 (JS_Dashboard)
+    // ============================================
+
+    let dashboardCharts = {};
+
+    function loadDashboard() {
+        showLoading();
+        google.script.run
+            .withSuccessHandler(function (stats) {
+                hideLoading();
+                renderDashboard(stats);
+            })
+            .withFailureHandler(function (error) {
+                hideLoading();
+                showToast('載入儀表板失敗：' + error.message, true);
+            })
+            .getDashboardData();
+    }
+
+    function renderDashboard(stats) {
+        // 1. 更新卡片數字
+        updateDashboardCard('dash-total-projects', stats.totalProjects);
+        updateDashboardCard('dash-filled-count', stats.filledCount);
+        updateDashboardCard('dash-holiday-nowork', stats.holidayNoWorkCount);
+
+        // 計算完成率
+        const rate = stats.totalProjects > 0
+            ? Math.round(((stats.filledCount + stats.holidayNoWorkCount) / stats.totalProjects) * 100)
+            : 0;
+        updateDashboardCard('dash-completion-rate', `${rate}%`);
+
+        // 2. 渲染圖表
+        renderCompletionChart(stats);
+        renderDeptChart(stats.byDept);
+        renderDisasterChart(stats.byDisaster);
+    }
+
+    function updateDashboardCard(id, value) {
+        const el = document.getElementById(id);
+        if (el) {
+            el.textContent = value;
+            // 簡單的數字跳動動畫可在此實作
+        }
+    }
+
+    function renderCompletionChart(stats) {
+        const ctx = document.getElementById('chart-daily-progress');
+        if (!ctx) return;
+
+        if (dashboardCharts.progress) dashboardCharts.progress.destroy();
+
+        const filled = stats.filledCount;
+        const holiday = stats.holidayNoWorkCount;
+        const unfilled = stats.totalProjects - filled - holiday;
+
+        dashboardCharts.progress = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['已施工', '假日不施工', '未填寫'],
+                datasets: [{
+                    data: [filled, holiday, unfilled],
+                    backgroundColor: ['#10b981', '#3b82f6', '#e5e7eb'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    title: { display: true, text: '今日填報狀況' }
+                }
+            }
+        });
+    }
+
+    function renderDeptChart(byDept) {
+        const ctx = document.getElementById('chart-dept-performance');
+        if (!ctx) return;
+
+        if (dashboardCharts.dept) dashboardCharts.dept.destroy();
+
+        const labels = Object.keys(byDept);
+        const totalData = labels.map(l => byDept[l].total);
+        const filledData = labels.map(l => byDept[l].filled);
+
+        dashboardCharts.dept = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: '應填報數',
+                        data: totalData,
+                        backgroundColor: '#94a3b8'
+                    },
+                    {
+                        label: '已填報數',
+                        data: filledData,
+                        backgroundColor: '#3b82f6'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                },
+                plugins: {
+                    title: { display: true, text: '各部門填報情形' }
+                }
+            }
+        });
+    }
+
+    function renderDisasterChart(byDisaster) {
+        const ctx = document.getElementById('chart-disaster-stats');
+        if (!ctx) return; // 這個圖表可能是選配
+
+        if (dashboardCharts.disaster) dashboardCharts.disaster.destroy();
+
+        // 取前 5 名
+        const sorted = Object.entries(byDisaster).sort((a, b) => b[1] - a[1]).slice(0, 5);
+        const labels = sorted.map(i => i[0]);
+        const data = sorted.map(i => i[1]);
+
+        dashboardCharts.disaster = new Chart(ctx, {
+            type: 'bar',
+            indexAxis: 'y',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '今日通報數',
+                    data: data,
+                    backgroundColor: '#f59e0b'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: { display: true, text: '今日災害類型 Top 5' }
+                }
+            }
+        });
+    }
+
+</script>

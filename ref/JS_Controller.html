@@ -1,0 +1,340 @@
+<script>
+    // ============================================
+    // 全域變數控制器 (JS_Controller)
+    // ============================================
+
+    // 全域變數
+    let allProjectsData = [];
+    let allInspectors = [];
+    let disasterOptions = [];
+    let currentUserInfo = null;
+    let currentHolidayInfo = null;
+    let currentSummaryData = [];
+    let filledDates = [];
+    let currentCalendarYear = new Date().getFullYear();
+    let currentCalendarMonth = new Date().getMonth();
+    let currentMonthHolidays = {};
+    let allInspectorsWithStatus = [];
+    let isGuestMode = true;
+    let guestViewMode = 'tomorrow';
+
+    // 檢驗員部門編號前綴映射
+    const DEPT_CODE_MAP = {
+        '土木隊': 'CV',
+        '建築隊': 'AR',
+        '電氣隊': 'EL',
+        '機械隊': 'ME',
+        '中部隊': 'CT',
+        '南部隊': 'ST',
+        '委外監造': 'OS'
+    };
+
+    // ============================================
+    // 初始化
+    // ============================================
+    document.addEventListener('DOMContentLoaded', function () {
+        console.log('App Initializing...');
+        initGuestMode();
+        setupModalOutsideClick(); // Utils
+    });
+
+    function initGuestMode() {
+        isGuestMode = true;
+        currentUserInfo = null;
+        showMainInterface();
+
+        // 延遲載入以確保 DOM 就緒
+        setTimeout(() => {
+            loadGuestData();
+        }, 100);
+
+        updateUIForGuestMode();
+    }
+
+    // ============================================
+    // 登入驗證與 UI 切換
+    // ============================================
+    function checkLoginStatus() {
+        showLoading();
+        google.script.run
+            .withSuccessHandler(function (session) {
+                hideLoading();
+                if (session.isLoggedIn) {
+                    currentUserInfo = session;
+                    isGuestMode = false;
+                    updateUIForLoggedIn();
+                    loadInitialData(); // 載入基礎資料
+                } else {
+                    showToast('登入驗證失敗', true);
+                }
+            })
+            .withFailureHandler(function (error) {
+                hideLoading();
+                showToast('系統錯誤：' + error.message, true);
+            })
+            .getCurrentSession();
+    }
+
+    function showLoginInterface() {
+        document.getElementById('loginModal').style.display = 'flex';
+    }
+
+    function hideLoginInterface() {
+        document.getElementById('loginModal').style.display = 'none';
+    }
+
+    function showMainInterface() {
+        document.getElementById('loginContainer').style.display = 'none';
+        document.getElementById('mainContainer').style.display = 'block';
+        setupEventListeners();
+    }
+
+    function updateUIForGuestMode() {
+        document.getElementById('userInfoPanel').style.display = 'none';
+        document.getElementById('guestLoginBtn').style.display = 'flex';
+
+        // 隱藏 Tabs
+        const tabs = document.querySelector('.tabs');
+        if (tabs) tabs.style.display = 'none';
+
+        // 隱藏所有 tab-pane
+        document.querySelectorAll('.tab-pane').forEach(pane => pane.style.display = 'none');
+
+        // 顯示總表
+        const summaryReport = document.getElementById('summaryReport');
+        if (summaryReport) summaryReport.style.display = 'block';
+
+        // 顯示訪客 Card
+        const guestCards = document.getElementById('guestSummaryCards');
+        if (guestCards) guestCards.style.display = 'block';
+
+        // 隱藏 Controls
+        const summaryControls = document.querySelector('.summary-controls');
+        if (summaryControls) summaryControls.style.display = 'none';
+
+        // 隱藏 TBM
+        const tbmkyCard = document.getElementById('tbmkyCard');
+        if (tbmkyCard) tbmkyCard.style.display = 'none';
+    }
+
+    function updateUIForLoggedIn() {
+        if (currentUserInfo) {
+            document.getElementById('currentUserName').textContent = currentUserInfo.name;
+            document.getElementById('currentUserRole').textContent = currentUserInfo.role;
+
+            // 顯示 Tabs
+            const tabs = document.querySelector('.tabs');
+            if (tabs) tabs.style.display = 'flex';
+
+            // 顯示 Controls
+            const summaryControls = document.querySelector('.summary-controls');
+            if (summaryControls) summaryControls.style.display = 'block';
+
+            // 隱藏訪客 Card
+            const guestCards = document.getElementById('guestSummaryCards');
+            if (guestCards) guestCards.style.display = 'none';
+
+            // 顯示 TBM
+            const tbmkyCard = document.getElementById('tbmkyCard');
+            if (tbmkyCard) tbmkyCard.style.display = 'block';
+
+            // 顯示 User Info Panel
+            document.getElementById('userInfoPanel').style.display = 'flex';
+            document.getElementById('helpBtn').style.display = 'flex';
+            document.getElementById('changePasswordBtn').style.display = 'flex';
+            document.getElementById('logoutBtn').style.display = 'flex';
+            document.getElementById('guestLoginBtn').style.display = 'none';
+
+            // 角色權限處理 Tabs
+            // 重置顯示
+            document.querySelectorAll('.tab').forEach(t => t.style.display = 'flex');
+
+            // 儀表板 Tab (dashboard) 總是對登入者顯示
+            const dashboardTab = document.querySelector('.tab-dashboard');
+            if (dashboardTab) dashboardTab.style.display = 'flex';
+
+            if (currentUserInfo.role === '填表人') {
+                if (document.querySelector('.tab-logStatus')) document.querySelector('.tab-logStatus').style.display = 'none';
+                if (document.querySelector('.tab-inspectorManagement')) document.querySelector('.tab-inspectorManagement').style.display = 'none';
+                if (document.querySelector('.tab-userManagement')) document.querySelector('.tab-userManagement').style.display = 'none';
+            }
+        }
+    }
+
+    function handleLogin(event) {
+        event.preventDefault();
+        const identifier = document.getElementById('loginIdentifier').value.trim();
+        const password = document.getElementById('loginPassword').value;
+
+        if (!identifier || !password) {
+            showToast('請輸入帳號/信箱和密碼', true);
+            return;
+        }
+
+        showLoading();
+        google.script.run
+            .withSuccessHandler(function (result) {
+                hideLoading();
+                if (result.success) {
+                    currentUserInfo = result.user;
+                    isGuestMode = false;
+                    hideLoginInterface();
+                    updateUIForLoggedIn();
+                    showToast(result.message);
+                    setTimeout(() => {
+                        loadInitialData(); // Controller or API
+                        // 填表人提醒
+                        if (currentUserInfo.role === '填表人') {
+                            // checkFillerReminders() is in LogEntry or API? Let's put in LogEntry?
+                            // Since it's 'Filler' specific, LogEntry makes sense, OR Utils.
+                            // We will define it in JS_LogEntry.html
+                            if (typeof checkFillerReminders === 'function') checkFillerReminders();
+                        }
+                        // 載入儀表板數據
+                        if (typeof loadDashboard === 'function') loadDashboard();
+                    }, 500);
+                } else {
+                    showToast(result.message, true);
+                }
+            })
+            .withFailureHandler(function (error) {
+                hideLoading();
+                showToast('登入失敗：' + error.message, true);
+            })
+            .authenticateUser(identifier, password);
+    }
+
+    function handleLogout() {
+        showConfirmModal('確定要登出系統嗎？', function () {
+            showLoading();
+            google.script.run
+                .withSuccessHandler(function (result) {
+                    hideLoading();
+                    if (result.success) {
+                        location.reload();
+                    }
+                })
+                .withFailureHandler(function (error) {
+                    hideLoading();
+                    showToast('登出失敗', true);
+                })
+                .logoutUser();
+            closeConfirmModal();
+        });
+    }
+
+    // ============================================
+    // 頁籤切換
+    // ============================================
+    function switchTab(tabName) {
+        if (isGuestMode && tabName !== 'summaryReport') {
+            showToast('請先登入才能使用此功能', true);
+            showLoginInterface();
+            return;
+        }
+
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+
+        const tabBtn = document.querySelector(`.tab[data-tab="${tabName}"]`);
+        if (tabBtn) tabBtn.classList.add('active');
+
+        const tabPane = document.getElementById(tabName);
+        if (tabPane) tabPane.classList.add('active');
+
+        // 根據頁籤載入資料
+        switch (tabName) {
+            case 'dashboard':
+                if (typeof loadDashboard === 'function') loadDashboard();
+                break;
+            case 'summaryReport':
+                if (typeof loadSummaryReport === 'function') loadSummaryReport();
+                break;
+            case 'logEntry':
+                if (currentUserInfo && currentUserInfo.role === '填表人' && typeof updateUnfilledCardsDisplay === 'function') {
+                    updateUnfilledCardsDisplay();
+                }
+                break;
+            case 'logStatus':
+                if (typeof loadLogStatus === 'function') loadLogStatus();
+                break;
+            case 'projectSetup':
+                if (typeof loadAndRenderProjectCards === 'function') loadAndRenderProjectCards();
+                break;
+            case 'inspectorManagement':
+                if (typeof loadInspectorManagement === 'function') loadInspectorManagement();
+                break;
+            case 'userManagement':
+                if (typeof loadUserManagement === 'function') loadUserManagement();
+                break;
+        }
+    }
+
+    // ============================================
+    // 基礎資料載入
+    // ============================================
+    function loadInitialData() {
+        // 載入工程、檢驗員、災害類型等
+        // 原本在 LogJavaScript.html 的 loadInitialData
+        google.script.run
+            .withSuccessHandler(function (data) {
+                allProjectsData = data.projects || [];
+                allInspectors = data.inspectors || [];
+                disasterOptions = data.disasterTypes || [];
+
+                console.log('Initial data loaded', data);
+
+                // 若有需要初始化的下拉選單，在此呼叫相關渲染函數
+                // 例如 renderInspectorFilter() in Summary
+                if (typeof renderInspectorFilter === 'function') renderInspectorFilter();
+            })
+            .withFailureHandler(function (e) {
+                console.error(e);
+                showToast('載入初始資料失敗', true);
+            })
+            .loadInitialData(); // 後端也要有這個函式 (原本就有)
+    }
+
+    // ============================================
+    // 事件監聽 (Global Event Listeners)
+    // ============================================
+    function setupEventListeners() {
+        // 登入
+        const loginForm = document.getElementById('loginForm');
+        if (loginForm) loginForm.addEventListener('submit', handleLogin);
+
+        // 登出
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+
+        // 頁籤
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function () {
+                const targetTab = this.getAttribute('data-tab');
+                switchTab(targetTab);
+            });
+        });
+
+        // 其他 Listener 建議放在各模組的初始化函式中，或者在這裡統一綁定
+        // 為了保持 Controller 乾淨，建議 LogEntry 相關的去 JS_LogEntry.html 綁定
+        // 但因為 setupEventListeners 是在 MainInterface 顯示時呼叫一次，
+        // 我們可以在這裡呼叫各模組的 setup function
+
+        if (typeof setupLogEntryListeners === 'function') setupLogEntryListeners();
+        if (typeof setupSummaryListeners === 'function') setupSummaryListeners();
+        if (typeof setupAdminListeners === 'function') setupAdminListeners();
+    }
+
+    function togglePasswordVisibility() {
+        const passwordInput = document.getElementById('loginPassword');
+        const toggleIcon = document.getElementById('passwordToggleIcon');
+        if (passwordInput.type === 'password') {
+            passwordInput.type = 'text';
+            toggleIcon.textContent = '🙈';
+        } else {
+            passwordInput.type = 'password';
+            toggleIcon.textContent = '👁️';
+        }
+    }
+
+</script>

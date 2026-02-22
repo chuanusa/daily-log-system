@@ -1,0 +1,185 @@
+<script>
+    // ============================================
+    // 工具函數庫 (JS_Utils)
+    // ============================================
+
+    // 顯示 Loading 遮罩
+    function showLoading() {
+        const overlay = document.getElementById('loadingOverlay');
+        if (overlay) overlay.classList.add('active');
+    }
+
+    // 隱藏 Loading 遮罩
+    function hideLoading() {
+        const overlay = document.getElementById('loadingOverlay');
+        if (overlay) overlay.classList.remove('active');
+    }
+
+    // 顯示 Toast 訊息
+    function showToast(message, isError = false) {
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+
+        const toast = document.createElement('div');
+        toast.className = `toast ${isError ? 'error' : ''}`;
+        toast.innerHTML = `
+      <div class="toast-content">
+        <span class="toast-icon">${isError ? '❌' : '✅'}</span>
+        <span>${message}</span>
+      </div>
+    `;
+
+        container.appendChild(toast);
+
+        // 動畫進場
+        requestAnimationFrame(() => {
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateY(0)';
+        });
+
+        // 自動移除
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(100%)';
+            setTimeout(() => {
+                if (toast.parentNode) toast.parentNode.removeChild(toast);
+            }, 300);
+        }, 3000);
+    }
+
+    // 文字截斷
+    function truncateText(text, maxLength) {
+        if (!text) return '-';
+        if (text.length <= maxLength) return text;
+        return text.substring(0, maxLength) + '...';
+    }
+
+    // 顯示確認對話框
+    function showConfirmModal(message, onConfirm) {
+        const msgEl = document.getElementById('confirmMessage');
+        const modal = document.getElementById('confirmModal');
+        const confirmBtn = document.getElementById('confirmBtn');
+
+        if (msgEl) msgEl.innerHTML = message;
+
+        // 移除舊的監聽器
+        const newConfirmBtn = confirmBtn.cloneNode(true);
+        confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+
+        // 添加新的監聽器
+        newConfirmBtn.addEventListener('click', function () {
+            if (typeof onConfirm === 'function') onConfirm();
+        });
+
+        if (modal) modal.style.display = 'flex';
+    }
+
+    // 關閉確認對話框
+    function closeConfirmModal() {
+        const modal = document.getElementById('confirmModal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    // 彈窗外點擊關閉設定
+    function setupModalOutsideClick() {
+        const modals = [
+            'loginModal',
+            'editSummaryLogModal',
+            'editProjectModal',
+            'addInspectorModal',
+            'editInspectorModal',
+            'tbmkyModal',
+            'tbmkyResultModal',
+            'calendarDetailModal',
+            'confirmModal',
+            'fillerReminderModal',
+            'roleGuideModal',
+            'changePasswordModal',
+            'batchHolidayModal',
+            'addUserModal'
+        ];
+
+        modals.forEach(modalId => {
+            const modal = document.getElementById(modalId);
+            if (modal) {
+                modal.addEventListener('click', function (e) {
+                    if (e.target === modal) {
+                        // 對於特定 Modal 可能需要特殊處理
+                        switch (modalId) {
+                            case 'loginModal':
+                                // 登入視窗不可點擊外部關閉 (視需求而定，若強制登入則不關閉)
+                                // hideLoginInterface(); 
+                                break;
+                            case 'editSummaryLogModal':
+                                document.getElementById(modalId).style.display = 'none';
+                                break;
+                            case 'editProjectModal':
+                                document.getElementById(modalId).style.display = 'none';
+                                break;
+                            case 'addInspectorModal':
+                                document.getElementById(modalId).style.display = 'none';
+                                break;
+                            case 'editInspectorModal':
+                                document.getElementById(modalId).style.display = 'none';
+                                break;
+                            case 'tbmkyModal':
+                                document.getElementById(modalId).style.display = 'none';
+                                break;
+                            case 'tbmkyResultModal':
+                                document.getElementById(modalId).style.display = 'none';
+                                break;
+                            case 'calendarDetailModal':
+                                document.getElementById(modalId).style.display = 'none';
+                                break;
+                            case 'confirmModal':
+                                closeConfirmModal();
+                                break;
+                            case 'fillerReminderModal':
+                                document.getElementById(modalId).style.display = 'none';
+                                break;
+                            case 'roleGuideModal':
+                                document.getElementById(modalId).style.display = 'none';
+                                break;
+                            case 'changePasswordModal':
+                                document.getElementById(modalId).style.display = 'none';
+                                break;
+                            case 'batchHolidayModal':
+                                document.getElementById(modalId).style.display = 'none';
+                                break;
+                            case 'addUserModal':
+                                document.getElementById(modalId).style.display = 'none';
+                                break;
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    // 效能監控
+    function logPerformance(label) {
+        if (window.performance && window.performance.now) {
+            const time = window.performance.now();
+            // console.log(`[Performance] ${label}: ${time.toFixed(2)}ms`); 
+        }
+    }
+
+    // 生成檢驗員 ID
+    function generateInspectorId(dept) {
+        if (!dept) return null;
+        let prefix = DEPT_CODE_MAP[dept];
+        if (!prefix) {
+            // 如果沒有對應的前綴，嘗試從部門名稱取前兩個字或自定義
+            if (dept.includes('隊')) prefix = 'TEAM';
+            else prefix = 'GEN';
+        }
+
+        // 這裡只是預覽，實際邏輯可能需要現有 ID 來計算最大值，
+        // 但通常前端只是給個格式。完整生成邏輯若依賴後端則無需前端生成。
+        // 原程式碼似乎有前端生成邏輯，保留之。
+        // 需確保 DEPT_CODE_MAP 可用 (在 Controller 定義或 Utils 定義)
+        // 建議將 DEPT_CODE_MAP 移至 Controller 或 Global Config
+        return `${prefix}-DATE`;
+    }
+
+</script>

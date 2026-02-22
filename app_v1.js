@@ -1,56 +1,206 @@
-
 // ==========================================
-// 替身 mock GAS_API
+// 替身 mock google.script.run
 // ==========================================
 const API_URL = "https://script.google.com/macros/s/AKfycbwDuDK2BYwykf0Z-u2FNFwxqyu0NZbE4emYceSMAIa3oD5JRUB9zIzRHfbVxtHdEzfnlg/exec"; // 請替換為部署後的網址
 
-window.GAS_API = (function () {
-  function createRunner(successHandler, failureHandler) {
-    const handlerObj = {
-      withSuccessHandler: function (callback) {
-        return createRunner(callback, failureHandler);
-      },
-      withFailureHandler: function (callback) {
-        return createRunner(successHandler, callback);
-      }
-    };
-
-    return new Proxy(handlerObj, {
-      get: function (target, prop) {
-        if (prop in target) {
-          return target[prop];
+window.google = window.google || {};
+window.google.script = {
+  run: (function () {
+    // 建立一個可以連鎖呼叫的處理器
+    function createRunner(successHandler, failureHandler) {
+      const handlerObj = {
+        withSuccessHandler: function (callback) {
+          return createRunner(callback, failureHandler);
+        },
+        withFailureHandler: function (callback) {
+          return createRunner(successHandler, callback);
         }
+      };
 
-        return function (...args) {
-          console.log(`發送 API 請求：${prop.toString()}`, args);
-          fetch(API_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-              action: prop,
-              args: args
+      // 使用 Proxy 攔截未知的屬性（即後端函數名稱），例如 .getDailySummaryReport
+      return new Proxy(handlerObj, {
+        get: function (target, prop) {
+          // 如果呼叫的是 withSuccessHandler 或 withFailureHandler，直接回傳
+          if (prop in target) {
+            return target[prop];
+          }
+
+          // 否則視為呼叫後端 API
+          return function (...args) {
+            console.log(`發送 API 請求：${prop.toString()}`, args);
+            fetch(API_URL, {
+              method: 'POST',
+              body: JSON.stringify({
+                action: prop,
+                args: args
+              })
             })
-          })
-            .then(res => res.json())
-            .then(result => {
-              console.log(`收到 API 回應：${prop.toString()}`, result);
-              if (result.status === 'success') {
-                if (successHandler) successHandler(result.data);
-              } else {
-                if (failureHandler) failureHandler(new Error(result.message));
-                else console.error("API Error:", result.message);
-              }
-            })
-            .catch(error => {
-              if (failureHandler) failureHandler(error);
-              else console.error("Fetch Error:", error);
-            });
-        };
-      }
-    });
+              .then(res => res.json())
+              .then(result => {
+                console.log(`收到 API 回應：${prop.toString()}`, result);
+                if (result.status === 'success') {
+                  if (successHandler) successHandler(result.data);
+                } else {
+                  if (failureHandler) failureHandler(new Error(result.message));
+                  else console.error("API Error:", result.message);
+                }
+              })
+              .catch(error => {
+                if (failureHandler) failureHandler(error);
+                else console.error("Fetch Error:", error);
+              });
+          };
+        }
+      });
+    }
+
+    return createRunner(null, null);
+  })(),
+  host: {
+    close: function () {
+      console.log("google.script.host.close() called");
+    }
+  }
+};
+
+
+// --- From JS_Dashboard.html ---
+
+// ============================================
+// 每月儀表板邏輯 (JS_Dashboard)
+// ============================================
+
+let dashboardCharts = {};
+let dashboardDataDate = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+
+// 初始化
+document.addEventListener('DOMContentLoaded', function () {
+  renderDashboardSelectors();
+  document.getElementById('dashYearSelect').addEventListener('change', updateDashboardData);
+  document.getElementById('dashMonthSelect').addEventListener('change', updateDashboardData);
+});
+
+// 渲染年份與月份選擇器
+function renderDashboardSelectors() {
+  const yearSelect = document.getElementById('dashYearSelect');
+  const monthSelect = document.getElementById('dashMonthSelect');
+
+  const currentYear = new Date().getFullYear();
+  yearSelect.innerHTML = '';
+  for (let y = currentYear; y >= currentYear - 2; y--) {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y + '年';
+    if (y === dashboardDataDate.year) opt.selected = true;
+    yearSelect.appendChild(opt);
   }
 
-  return createRunner(null, null);
-})();
+  monthSelect.innerHTML = '';
+  for (let m = 1; m <= 12; m++) {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = m + '月';
+    if (m === dashboardDataDate.month) opt.selected = true;
+    monthSelect.appendChild(opt);
+  }
+}
+
+function updateDashboardData() {
+  dashboardDataDate.year = parseInt(document.getElementById('dashYearSelect').value);
+  dashboardDataDate.month = parseInt(document.getElementById('dashMonthSelect').value);
+  loadMonthlyDashboard();
+}
+
+function loadMonthlyDashboard() {
+  showLoading();
+  // 呼叫後端 getMonthlyDashboardData
+  google.script.run
+    .withSuccessHandler(function (data) {
+      hideLoading();
+      if (data.error) {
+        showToast('載入失敗: ' + data.error, true);
+      } else {
+        renderDashboardCharts(data);
+      }
+    })
+    .withFailureHandler(function (error) {
+      hideLoading();
+      showToast('載入儀表板失敗：' + error.message, true);
+    })
+    .getMonthlyDashboardData(dashboardDataDate.year, dashboardDataDate.month);
+}
+
+function renderDashboardCharts(data) {
+  if (!document.getElementById('chart-work-days')) return;
+
+  // 1. 各工程出工日數 (Bar Chart)
+  const ctxWork = document.getElementById('chart-work-days');
+
+  if (dashboardCharts.workDays) dashboardCharts.workDays.destroy();
+
+  // 取前 20 名以免太擠
+  const workData = data.workDays.slice(0, 20);
+  const workLabels = workData.map(d => d.name);
+  const workValues = workData.map(d => d.days);
+
+  dashboardCharts.workDays = new Chart(ctxWork, {
+    type: 'bar',
+    data: {
+      labels: workLabels,
+      datasets: [{
+        label: '本月出工日數 (天)',
+        data: workValues,
+        backgroundColor: '#3b82f6',
+        borderRadius: 4
+      }]
+    },
+    options: {
+      indexAxis: 'y', // 水平長條圖
+      responsive: true,
+      plugins: {
+        title: { display: true, text: `${data.year}年${data.month}月 各工程出工日數 (Top 20)` },
+        legend: { display: false }
+      },
+      scales: {
+        x: { beginAtZero: true, stepSize: 1 }
+      }
+    }
+  });
+
+  // 2. 危害統計 (Bar/Pie Chart)
+  const ctxHazard = document.getElementById('chart-hazards');
+
+  if (dashboardCharts.hazards) dashboardCharts.hazards.destroy();
+
+  const hazardLabels = data.hazards.map(h => h.type);
+  const hazardValues = data.hazards.map(h => h.count);
+
+  dashboardCharts.hazards = new Chart(ctxHazard, {
+    type: 'bar', // 或 'pie'
+    data: {
+      labels: hazardLabels,
+      datasets: [{
+        label: '出現次數',
+        data: hazardValues,
+        backgroundColor: '#ef4444',
+        borderRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        title: { display: true, text: `${data.year}年${data.month}月 整體危害統計` },
+        legend: { display: false }
+      },
+      scales: {
+        y: { beginAtZero: true, stepSize: 1 }
+      }
+    }
+  });
+}
+
+
+// --- From LogJavaScript.html ---
 
 // ============================================
 // 綜合施工處 每日工程日誌系統 JavaScript v2.1
@@ -184,7 +334,7 @@ function loadGuestData() {
 
 function checkLoginStatus() {
   showLoading();
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (session) {
       hideLoading();
       if (session.isLoggedIn) {
@@ -205,6 +355,62 @@ function checkLoginStatus() {
 
 function showLoginInterface() {
   document.getElementById('loginModal').style.display = 'flex';
+  initGoogleSignIn();
+}
+
+function initGoogleSignIn() {
+  if (window.google && google.accounts && google.accounts.id) {
+    google.accounts.id.initialize({
+      client_id: "62340397596-cd3pfo4me39v4rgmq96iaknter75lga9.apps.googleusercontent.com",
+      callback: handleCredentialResponse
+    });
+    google.accounts.id.renderButton(
+      document.getElementById("googleSignInButton"),
+      { theme: "outline", size: "large", width: 250, text: "signin_with" }
+    );
+  } else {
+    setTimeout(initGoogleSignIn, 500); // Wait for external script to load
+  }
+}
+
+function decodeJwtResponse(token) {
+  var base64Url = token.split('.')[1];
+  var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+  var jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function (c) {
+    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+  }).join(''));
+  return JSON.parse(jsonPayload);
+}
+
+function handleCredentialResponse(response) {
+  const responsePayload = decodeJwtResponse(response.credential);
+  const email = responsePayload.email;
+
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function (result) {
+      hideLoading();
+      if (result.success) {
+        currentUserInfo = result.user;
+        isGuestMode = false;
+        hideLoginInterface();
+        updateUIForLoggedIn();
+        showToast(result.message);
+        setTimeout(() => {
+          loadInitialData();
+          if (currentUserInfo.role === '填表人') {
+            checkFillerReminders();
+          }
+        }, 500);
+      } else {
+        showToast(result.message, true);
+      }
+    })
+    .withFailureHandler(function (error) {
+      hideLoading();
+      showToast('Google 登入失敗：' + error.message, true);
+    })
+    .authenticateGoogleUser(email);
 }
 
 function hideLoginInterface() {
@@ -235,7 +441,7 @@ function submitForgotPassword() {
   showLoading();
   closeForgotPasswordModal();
 
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (result) {
       hideLoading();
       if (result.success) {
@@ -388,46 +594,6 @@ function togglePasswordVisibility() {
 // ============================================
 // 登入/登出功能
 // ============================================
-function decodeJwtResponse(token) {
-  var base64Url = token.split('.')[1];
-  var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-  var jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function (c) {
-    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-  }).join(''));
-  return JSON.parse(jsonPayload);
-}
-
-function handleCredentialResponse(response) {
-  const responsePayload = decodeJwtResponse(response.credential);
-  const email = responsePayload.email;
-
-  showLoading();
-  window.GAS_API
-    .withSuccessHandler(function (result) {
-      hideLoading();
-      if (result.success) {
-        currentUserInfo = result.user;
-        isGuestMode = false;
-        hideLoginInterface();
-        updateUIForLoggedIn();
-        showToast(result.message);
-        setTimeout(() => {
-          loadInitialData();
-          if (currentUserInfo.role === '填表人') {
-            checkFillerReminders();
-          }
-        }, 500);
-      } else {
-        showToast(result.message, true);
-      }
-    })
-    .withFailureHandler(function (error) {
-      hideLoading();
-      showToast('Google 登入失敗：' + error.message, true);
-    })
-    .authenticateGoogleUser(email);
-}
-
 function handleLogin(event) {
   event.preventDefault();
 
@@ -440,7 +606,7 @@ function handleLogin(event) {
   }
 
   showLoading();
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (result) {
       hideLoading();
       if (result.success) {
@@ -476,7 +642,7 @@ function handleLogout() {
 
   showConfirmModal(confirmMessage, function () {
     showLoading();
-    window.GAS_API
+    google.script.run
       .withSuccessHandler(function (result) {
         hideLoading();
         if (result.success) {
@@ -557,7 +723,7 @@ function submitChangePassword() {
   }
 
   showLoading();
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (result) {
       hideLoading();
       if (result.success) {
@@ -592,7 +758,7 @@ function checkFillerReminders() {
 
   console.log('[checkFillerReminders] 傳遞給後端的字串:', managedProjectsStr);
 
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (result) {
       console.log('[checkFillerReminders] 後端返回結果:', result);
       if (result.unfilledProjects.length > 0 || result.incompleteProjects.length > 0) {
@@ -718,7 +884,7 @@ function updateUnfilledCardsDisplay() {
     return;
   }
 
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (result) {
       const container = document.getElementById('unfilledCardsContainer');
 
@@ -914,7 +1080,7 @@ function setupEventListeners() {
 function loadInitialData() {
   showLoading();
 
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (data) {
       allProjectsData = data.projects || [];
       disasterOptions = data.disasters || [];
@@ -1080,6 +1246,9 @@ function switchTab(tabName) {
     case 'userManagement':
       loadUserManagement();
       break;
+    case 'dashboard':
+      loadMonthlyDashboard();
+      break;
   }
 }
 
@@ -1104,7 +1273,7 @@ function checkAndShowHolidayAlert() {
   document.getElementById('checkSun').disabled = false;
   document.getElementById('checkHoliday').disabled = false;
 
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (holidayInfo) {
       currentHolidayInfo = holidayInfo;
 
@@ -1183,7 +1352,7 @@ function autoSubmitHolidayNoWork(dateString) {
 
   // 檢查哪些工程尚未填報
   showLoading();
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (result) {
       hideLoading();
 
@@ -1219,7 +1388,7 @@ function batchSubmitHolidayNoWork(dateString, projects) {
 
   // 逐一提交
   projects.forEach((project, index) => {
-    window.GAS_API
+    google.script.run
       .withSuccessHandler(function (result) {
         if (result.success) {
           successCount++;
@@ -1290,7 +1459,7 @@ function openFillerStartupModal() {
   showLoading();
 
   // 使用新的 getFillerReminders API
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (result) {
       hideLoading();
 
@@ -1347,7 +1516,7 @@ function handleProjectChange() {
   // [修正] 確保檢驗員資料已載入
   if (!allInspectors || allInspectors.length === 0) {
     showLoading();
-    window.GAS_API
+    google.script.run
       .withSuccessHandler(function (inspectors) {
         allInspectors = inspectors || [];
         handleProjectChange();
@@ -1363,7 +1532,7 @@ function handleProjectChange() {
   const dateString = document.getElementById('logDatePicker').value;
 
   showLoading();
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (inspectorIds) {
       hideLoading();
 
@@ -1523,7 +1692,7 @@ function getSelectedInspectors(containerId) {
 
 // [新增] 載入檢驗員清單到篩選器
 function loadInspectorsForFilter() {
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (inspectors) {
       const select = document.getElementById('summaryInspectorFilter');
       if (!select) return;
@@ -1675,7 +1844,7 @@ function copyLastWorkItems() {
   }
 
   showLoading();
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (result) {
       hideLoading();
       if (result.success && result.data) {
@@ -1909,7 +2078,7 @@ function collectWorkItems() {
 }
 
 function executeSubmitDailyLog(data) {
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (result) {
       hideLoading();
       if (result.success) {
@@ -1950,7 +2119,7 @@ function executeSubmitDailyLog(data) {
 // 未填寫數量統計
 // ============================================
 function loadUnfilledCount() {
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (data) {
       const container = document.getElementById('unfilledCardsContainer');
 
@@ -2078,7 +2247,7 @@ function loadSummaryReport() {
   const filterInspector = document.getElementById('summaryInspectorFilter').value; // [新增] 取得檢驗員篩選值
 
   showLoading();
-  window.GAS_API
+  google.script.run
 
     .withSuccessHandler(function (summaryData) {
       hideLoading();
@@ -2494,7 +2663,7 @@ function showBatchHolidayModal() {
   modal.style.display = 'flex';
 
   // 載入施工中工程
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (projects) {
       projectList.innerHTML = '';
       if (projects.length === 0) {
@@ -2571,7 +2740,7 @@ function submitBatchHoliday() {
 
   showConfirmModal(confirmMessage, function () {
     showLoading();
-    window.GAS_API
+    google.script.run
       .withSuccessHandler(function (result) {
         hideLoading();
         if (result.success) {
@@ -2930,7 +3099,7 @@ function collectEditWorkItems() {
 }
 
 function executeUpdateSummaryLog(data) {
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (result) {
       hideLoading();
       if (result.success) {
@@ -3031,12 +3200,12 @@ function submitBatchHoliday() {
     return;
   }
 
-  if (!confirm(`確定要為 ${selectedProjects.length} 個工程設定假日不施工嗎？日期：${startDate} ~ ${endDate}`)) {
+  if (!confirm(`確定要為 ${selectedProjects.length} 個工程設定假日不施工嗎？\n日期：${startDate} ~ ${endDate}`)) {
     return;
   }
 
   showLoading();
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (result) {
       hideLoading();
       if (result.success) {
@@ -3059,7 +3228,7 @@ function copyPreviousDayData() {
   const currentDate = document.getElementById('editSummaryLogDate').value;
 
   showLoading();
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (prevLog) {
       hideLoading();
       if (prevLog) {
@@ -3085,7 +3254,7 @@ function loadAndRenderProjectCards() {
 
   // 如果 allInspectors 還沒載入，先載入檢驗員資料
   if (!allInspectors || allInspectors.length === 0) {
-    window.GAS_API
+    google.script.run
       .withSuccessHandler(function (inspectors) {
         allInspectors = inspectors;
         // 載入檢驗員資料後，再載入工程資料
@@ -3103,7 +3272,7 @@ function loadAndRenderProjectCards() {
 }
 
 function loadProjectsData() {
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (projects) {
       // 不要在這裡 hideLoading，留給 renderProjectCards 完成後再關閉
       allProjectsData = projects;
@@ -3176,7 +3345,7 @@ function renderProjectCards(projects) {
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowStr = tomorrow.toISOString().substring(0, 10);
 
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (summaryData) {
       // 收到資料後才清空容器並渲染
       container.innerHTML = '';
@@ -3421,7 +3590,7 @@ function confirmEditProject() {
 
   showConfirmModal(confirmMessage, function () {
     showLoading();
-    window.GAS_API
+    google.script.run
       .withSuccessHandler(function (result) {
         hideLoading();
         if (result.success) {
@@ -3457,7 +3626,7 @@ function confirmEditProject() {
 // ============================================
 function loadInspectorManagement() {
   // showLoading 已在 switchTab 中處理
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (inspectors) {
       hideLoading();
       allInspectorsWithStatus = inspectors;
@@ -3680,7 +3849,7 @@ function confirmAddInspector() {
 
   showConfirmModal(confirmMessage, function () {
     showLoading();
-    window.GAS_API
+    google.script.run
       .withSuccessHandler(function (result) {
         hideLoading();
         if (result.success) {
@@ -3760,7 +3929,7 @@ function confirmEditInspector() {
 
   showConfirmModal(confirmMessage, function () {
     showLoading();
-    window.GAS_API
+    google.script.run
       .withSuccessHandler(function (result) {
         hideLoading();
         if (result.success) {
@@ -3794,7 +3963,7 @@ function confirmDeactivateInspector(inspectorId) {
   if (!inspector) return;
 
   showLoading();
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (usage) {
       hideLoading();
 
@@ -3819,7 +3988,7 @@ function confirmDeactivateInspector(inspectorId) {
         warningMessage += '</div>';
       }
 
-      const reason = prompt(`${warningMessage ? warningMessage + '' : ''}請輸入停用原因：`);
+      const reason = prompt(`${warningMessage ? warningMessage + '\n' : ''}請輸入停用原因：`);
 
       if (!reason || reason.trim() === '') {
         showToast('未輸入停用原因，已取消操作', false);
@@ -3837,7 +4006,7 @@ function confirmDeactivateInspector(inspectorId) {
 
       showConfirmModal(confirmMessage, function () {
         showLoading();
-        window.GAS_API
+        google.script.run
           .withSuccessHandler(function (result) {
             hideLoading();
             if (result.success) {
@@ -3887,7 +4056,7 @@ function confirmActivateInspector(inspectorId) {
 
   showConfirmModal(confirmMessage, function () {
     showLoading();
-    window.GAS_API
+    google.script.run
       .withSuccessHandler(function (result) {
         hideLoading();
         if (result.success) {
@@ -3917,7 +4086,7 @@ function confirmActivateInspector(inspectorId) {
 // ============================================
 function loadLogStatus() {
   // showLoading 已在 switchTab 中處理
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (data) {
       hideLoading();
       renderLogStatus(data);
@@ -4035,7 +4204,7 @@ function toggleDeptCard(cardId) {
 // 修正4：日曆功能（月份處理修正）
 // ============================================
 function loadFilledDates() {
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (dates) {
       filledDates = dates;
     })
@@ -4068,7 +4237,7 @@ function renderCalendar() {
   showLoading();
 
   // 載入該月假日資訊
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (holidays) {
       currentMonthHolidays = holidays;
       renderCalendarGrid();
@@ -4185,7 +4354,7 @@ function showCalendarDetailModal(dateString) {
   document.getElementById('detailDateTitle').textContent = dateString;
 
   showLoading();
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (summaryData) {
       hideLoading();
 
@@ -4297,7 +4466,7 @@ function confirmGenerateTBMKY() {
   closeTBMKYModal();
   showLoading();
 
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (result) {
       hideLoading();
       if (result.success) {
@@ -4684,7 +4853,7 @@ function loadUserManagement() {
   }
 
   // showLoading 已在 switchTab 中處理
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (users) {
       hideLoading();
       allUsersData = users;
@@ -4995,7 +5164,7 @@ function openAddUserModal() {
 }
 
 function loadDepartmentsForUser() {
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (departments) {
       const deptSelect = document.getElementById('userDept');
       deptSelect.innerHTML = '<option value="">請選擇部門</option>';
@@ -5047,7 +5216,7 @@ function handleRoleChange() {
 }
 
 function loadProjectsForUser() {
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (projects) {
       const container = document.getElementById('managedProjectsCheckboxes');
       container.innerHTML = '';
@@ -5174,7 +5343,7 @@ function editUser(rowIndex) {
   }
 
   // 載入工程列表並勾選已選工程
-  window.GAS_API
+  google.script.run
     .withSuccessHandler(function (projects) {
       const container = document.getElementById('managedProjectsCheckboxes');
       container.innerHTML = '';
@@ -5282,7 +5451,7 @@ function confirmAddUser() {
   } else {
     // 新增
     showLoading();
-    window.GAS_API
+    google.script.run
       .withSuccessHandler(function (result) {
         hideLoading();
         if (result.success) {
@@ -5310,7 +5479,7 @@ function deleteUserConfirm(rowIndex, userName) {
 
   showConfirmModal(confirmMessage, function () {
     showLoading();
-    window.GAS_API
+    google.script.run
       .withSuccessHandler(function (result) {
         hideLoading();
         if (result.success) {
@@ -5451,7 +5620,7 @@ function showEditUserConfirmModal(originalUser, newUserData) {
   showConfirmModal(confirmMessage, function () {
     // 確認後執行更新
     showLoading();
-    window.GAS_API
+    google.script.run
       .withSuccessHandler(function (result) {
         hideLoading();
         closeConfirmModal();
@@ -5481,3 +5650,5 @@ console.log('%c所有12項修正已完成實作', 'color: #10b981; font-size: 12
 // 初始化完成
 // ============================================
 console.log('%c✓ JavaScript 載入完成', 'color: #10b981; font-weight: bold;');
+
+
