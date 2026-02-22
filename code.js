@@ -768,6 +768,12 @@ function getAllInspectors() {
 
 function getAllInspectorsWithStatus() {
   try {
+    const cache = CacheService.getScriptCache();
+    const cachedData = cache.get('cache-inspectors');
+    if (cachedData) {
+      return JSON.parse(cachedData);
+    }
+
     const sheet = getSheet(CONFIG.SHEET_NAMES.INSPECTORS);
     const data = sheet.getDataRange().getValues();
     const cols = CONFIG.INSPECTOR_COLS;
@@ -788,6 +794,8 @@ function getAllInspectorsWithStatus() {
       }
     }
 
+    try { cache.put('cache-inspectors', JSON.stringify(inspectors), 3600); } catch (e) { }
+
     return inspectors;
   } catch (error) {
     Logger.log('getAllInspectorsWithStatus error: ' + error.toString());
@@ -797,6 +805,10 @@ function getAllInspectorsWithStatus() {
 
 function getDepartmentsList() {
   try {
+    const cache = CacheService.getScriptCache();
+    const cachedData = cache.get('cache-departments');
+    if (cachedData) return JSON.parse(cachedData);
+
     const sheet = getSheet(CONFIG.SHEET_NAMES.INSPECTORS);
     const data = sheet.getDataRange().getValues();
     const cols = CONFIG.INSPECTOR_COLS;
@@ -810,6 +822,7 @@ function getDepartmentsList() {
     }
 
     const departments = Array.from(deptSet).sort();
+    try { cache.put('cache-departments', JSON.stringify(departments), 3600); } catch (e) { }
     return departments;
   } catch (error) {
     Logger.log('getDepartmentsList error: ' + error.toString());
@@ -869,6 +882,12 @@ function addInspector(data) {
 
     logModification('檢驗員管理', newId, {}, data, data.reason, '新增檢驗員');
 
+    try {
+      const cache = CacheService.getScriptCache();
+      cache.remove('cache-inspectors');
+      cache.remove('cache-departments');
+    } catch (e) { }
+
     return {
       success: true,
       message: `檢驗員新增成功！編號：${newId}`
@@ -910,6 +929,12 @@ function updateInspector(data) {
 
         logModification('檢驗員管理', data.id, oldData, data, data.reason, '修改檢驗員');
 
+        try {
+          const cache = CacheService.getScriptCache();
+          cache.remove('cache-inspectors');
+          cache.remove('cache-departments');
+        } catch (e) { }
+
         return {
           success: true,
           message: `檢驗員 ${data.id} 資料更新成功`
@@ -945,6 +970,10 @@ function deactivateInspector(data) {
 
         logModification('檢驗員管理', data.id, { status: oldStatus }, { status: CONFIG.INSPECTOR_STATUS.INACTIVE }, data.reason, '停用檢驗員');
 
+        try {
+          CacheService.getScriptCache().remove('cache-inspectors');
+        } catch (e) { }
+
         return {
           success: true,
           message: `檢驗員 ${data.id} 已停用`
@@ -979,6 +1008,10 @@ function activateInspector(data) {
         sheet.getRange(i + 1, cols.STATUS + 1).setValue(CONFIG.INSPECTOR_STATUS.ACTIVE);
 
         logModification('檢驗員管理', data.id, { status: oldStatus }, { status: CONFIG.INSPECTOR_STATUS.ACTIVE }, data.reason, '啟用檢驗員');
+
+        try {
+          CacheService.getScriptCache().remove('cache-inspectors');
+        } catch (e) { }
 
         return {
           success: true,
@@ -1061,6 +1094,14 @@ function checkInspectorUsage(inspectorId) {
 // ============================================
 function getAllProjects() {
   try {
+    // 1. 嘗試從快取讀取
+    const cache = CacheService.getScriptCache();
+    const cachedData = cache.get('cache-allProjects');
+    if (cachedData) {
+      return JSON.parse(cachedData);
+    }
+
+    // 2. 快取失效，從試算表讀取
     const sheet = getSheet(CONFIG.SHEET_NAMES.PROJECT_INFO);
     const data = sheet.getDataRange().getValues();
     const cols = CONFIG.PROJECT_COLS;
@@ -1092,6 +1133,13 @@ function getAllProjects() {
           remark: row[cols.REMARK] || ''
         });
       }
+    }
+
+    // 3. 寫入快取，保存 1 小時 (3600秒)
+    try {
+      cache.put('cache-allProjects', JSON.stringify(projects), 3600);
+    } catch (e) {
+      Logger.log('Cache put error: ' + e);
     }
 
     return projects;
@@ -1154,6 +1202,13 @@ function updateProjectInfo(data) {
 
         const defaultInspectorsStr = data.defaultInspectors ? data.defaultInspectors.join(',') : '';
         sheet.getRange(i + 1, cols.INSPECTOR_ID + 1).setValue(defaultInspectorsStr);
+
+        // 4. 清除工程快取，確保下次讀取最新
+        try {
+          CacheService.getScriptCache().remove('cache-allProjects');
+        } catch (e) {
+          Logger.log('Cache remove error: ' + e.toString());
+        }
 
         logModification('工程設定', data.projectSeqNo, oldData, data, data.reason, '修改工程資料');
 
@@ -1324,9 +1379,10 @@ function submitDailyLog(data) {
     const inspectorIdsStr = data.inspectorIds.join(',');
     const isHolidayWorkStr = data.isHolidayWork ? '是' : '否';
 
+    const insertRows = [];
     data.workItems.forEach(item => {
       const row = [];
-      row[cols.DATE] = new Date(data.logDate);
+      row[cols.DATE] = new Date(data.loglogDate || data.logDate);
       row[cols.PROJECT_SEQ_NO] = data.projectSeqNo;
       row[cols.PROJECT_SHORT_NAME] = data.projectShortName || '';
       row[cols.INSPECTORS] = inspectorIdsStr;
@@ -1339,8 +1395,13 @@ function submitDailyLog(data) {
       row[cols.SUBMIT_TIME] = new Date();
       row[cols.IS_HOLIDAY_WORK] = isHolidayWorkStr;
 
-      sheet.appendRow(row);
+      insertRows.push(row);
     });
+
+    if (insertRows.length > 0) {
+      const startRow = Math.max(sheet.getLastRow(), 1) + 1;
+      sheet.getRange(startRow, 1, insertRows.length, insertRows[0].length).setValues(insertRows);
+    }
 
     return {
       success: true,
@@ -1687,6 +1748,7 @@ function updateDailySummaryLog(data) {
     const inspectorIdsStr = data.inspectorIds.join(',');
     const isHolidayWorkStr = data.isHolidayWork ? '是' : '否';
 
+    const insertRows = [];
     data.workItems.forEach(item => {
       const row = [];
       row[cols.DATE] = new Date(data.dateString);
@@ -1702,8 +1764,13 @@ function updateDailySummaryLog(data) {
       row[cols.SUBMIT_TIME] = new Date();
       row[cols.IS_HOLIDAY_WORK] = isHolidayWorkStr;
 
-      sheet.appendRow(row);
+      insertRows.push(row);
     });
+
+    if (insertRows.length > 0) {
+      const startRow = Math.max(sheet.getLastRow(), 1) + 1;
+      sheet.getRange(startRow, 1, insertRows.length, insertRows[0].length).setValues(insertRows);
+    }
 
     logModification('日誌修改', data.projectSeqNo, {}, data, data.reason, '修改日誌');
 
@@ -2777,6 +2844,10 @@ function generateTBMKY(params) {
 // ============================================
 function getDisasterTypes() {
   try {
+    const cache = CacheService.getScriptCache();
+    const cachedData = cache.get('cache-disasters');
+    if (cachedData) return JSON.parse(cachedData);
+
     const sheet = getSheet(CONFIG.SHEET_NAMES.DROPDOWN_OPTIONS);
     const data = sheet.getDataRange().getValues();
     const cols = CONFIG.DISASTER_COLS;
@@ -2807,6 +2878,8 @@ function getDisasterTypes() {
       }
     }
 
+    try { cache.put('cache-disasters', JSON.stringify(disasters), 3600); } catch (e) { }
+
     return disasters;
 
   } catch (error) {
@@ -2833,6 +2906,8 @@ function saveCustomDisasterType(customType) {
     row[cols.PRIORITY] = 999;
 
     sheet.appendRow(row);
+
+    try { CacheService.getScriptCache().remove('cache-disasters'); } catch (e) { }
 
   } catch (error) {
     Logger.log('saveCustomDisasterType error: ' + error.toString());
