@@ -103,6 +103,68 @@
           </div>
         </div>
 
+        <div class="header-nav">
+          <div class="tabs">
+            <button class="tab active" data-tab="summaryReport">
+              <span class="tab-icon">📊</span>
+              <span class="tab-text">每日總表</span>
+            </button>
+            <button class="tab tab-dashboard" data-tab="dashboard" style="display: none;">
+              <span class="tab-icon">📉</span>
+              <span class="tab-text">統計圖表</span>
+            </button>
+            <button class="tab tab-log" data-tab="dailyLog" style="display: none;">
+              <span class="tab-icon">📝</span>
+              <span class="tab-text">日誌填報</span>
+            </button>
+            <button class="tab tab-admin" data-tab="projectManagement" style="display: none;">
+              <span class="tab-icon">⚙️</span>
+              <span class="tab-text">工程設定</span>
+            </button>
+            <button class="tab tab-auth-mgt" data-tab="userManagement" style="display: none;">
+              <span class="tab-icon">👥</span>
+              <span class="tab-text">使用者管理</span>
+            </button>
+            <button class="tab tab-admin" data-tab="inspectorManagement" style="display: none;">
+              <span class="tab-icon">🕵️</span>
+              <span class="tab-text">檢驗員管理</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="header-nav">
+          <div class="tabs">
+            <button class="tab active" data-tab="summaryReport">
+              <span class="tab-icon">📊</span>
+              <span class="tab-text">每日總表</span>
+            </button>
+            <button class="tab tab-dashboard" data-tab="dashboard" style="display: none;">
+              <span class="tab-icon">📉</span>
+              <span class="tab-text">儀表板</span>
+            </button>
+            <button class="tab" data-tab="logEntry">
+              <span class="tab-icon">📝</span>
+              <span class="tab-text">日誌填報</span>
+            </button>
+            <button class="tab tab-logStatus" data-tab="logStatus">
+              <span class="tab-icon">📈</span>
+              <span class="tab-text">填報狀況</span>
+            </button>
+            <button class="tab" data-tab="projectSetup">
+              <span class="tab-icon">⚙️</span>
+              <span class="tab-text">工程設定</span>
+            </button>
+            <button class="tab tab-inspectorManagement" data-tab="inspectorManagement">
+              <span class="tab-icon">👥</span>
+              <span class="tab-text">檢驗員管理</span>
+            </button>
+            <button class="tab tab-userManagement" data-tab="userManagement" style="display: none;">
+              <span class="tab-icon">🔐</span>
+              <span class="tab-text">使用者管理</span>
+            </button>
+          </div>
+        </div>
+
         <div class="header-right">
           <!-- 訪客模式登入按鈕 -->
           <div id="guestLoginBtn" style="display: none;">
@@ -139,42 +201,7 @@
         </div>
       </div>
     </header>
-
-    <!-- 頁籤導覽 -->
-    <div class="tabs">
-      <button class="tab active" data-tab="summaryReport">
-        <span class="tab-icon">📊</span>
-        <span class="tab-text">每日總表</span>
-      </button>
-      <button class="tab tab-dashboard" data-tab="dashboard" style="display: none;">
-        <span class="tab-icon">📉</span>
-        <span class="tab-text">儀表板</span>
-      </button>
-      <button class="tab" data-tab="logEntry">
-        <span class="tab-icon">📝</span>
-        <span class="tab-text">日誌填報</span>
-      </button>
-      <button class="tab tab-logStatus" data-tab="logStatus">
-        <span class="tab-icon">📈</span>
-        <span class="tab-text">填報狀況</span>
-      </button>
-      <button class="tab" data-tab="projectSetup">
-        <span class="tab-icon">⚙️</span>
-        <span class="tab-text">工程設定</span>
-      </button>
-      <button class="tab tab-inspectorManagement" data-tab="inspectorManagement">
-        <span class="tab-icon">👥</span>
-        <span class="tab-text">檢驗員管理</span>
-      </button>
-      <button class="tab tab-userManagement" data-tab="userManagement" style="display: none;">
-        <span class="tab-icon">🔐</span>
-        <span class="tab-text">使用者管理</span>
-      </button>
-    </div>
-
-    <!-- ============================================ -->
-    <!-- 頁籤：每日總表 -->
-    <!-- ============================================ -->
+    <!-- 主內容區域開始 -->
     <div id="summaryReport" class="tab-pane active">
       <div class="glass-card" style="margin-bottom: 2rem;">
         <div style="display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; justify-content: space-between;">
