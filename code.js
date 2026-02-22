@@ -3852,3 +3852,66 @@ function authenticateGoogleUser(email) {
     };
   }
 }
+
+// ==========================================
+// 自動封存舊日誌 (最佳化加速)
+// ==========================================
+function archiveOldLogs() {
+  try {
+    const dbSheet = getSheet(CONFIG.SHEET_NAMES.DAILY_LOG_DB);
+    let archiveSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('日誌歷史資料');
+
+    // 如果沒有歷史資料表，自動建立一個並複製原本的標題
+    if (!archiveSheet) {
+      archiveSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet('日誌歷史資料');
+      const headers = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getValues();
+      archiveSheet.getRange(1, 1, 1, headers[0].length).setValues(headers);
+    }
+
+    const data = dbSheet.getDataRange().getValues();
+    if (data.length <= 1) return { success: true, message: '尚未有日誌資料' };
+
+    const logs = data.slice(1);
+
+    // 計算 40 天前的界線日期
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - 40);
+    cutoffDate.setHours(0, 0, 0, 0);
+
+    const toArchive = [];
+    const toKeep = [];
+
+    logs.forEach(row => {
+      // 確保日期欄位有效
+      const logDate = new Date(row[CONFIG.DAILY_LOG_COLS.DATE]);
+      if (logDate && logDate < cutoffDate) {
+        toArchive.push(row);
+      } else {
+        toKeep.push(row);
+      }
+    });
+
+    // 如果有舊資料需要封存
+    if (toArchive.length > 0) {
+      // 1. 一次性寫入到歷史資料表的最下方
+      const archiveLastRow = Math.max(archiveSheet.getLastRow(), 1);
+      archiveSheet.getRange(archiveLastRow + 1, 1, toArchive.length, toArchive[0].length).setValues(toArchive);
+
+      // 2. 清空原本的日誌表（保留第1列標題）
+      dbSheet.getRange(2, 1, dbSheet.getLastRow(), dbSheet.getLastColumn()).clearContent();
+
+      // 3. 把不需要封存的（近40天內）資料一次性寫回
+      if (toKeep.length > 0) {
+        dbSheet.getRange(2, 1, toKeep.length, toKeep[0].length).setValues(toKeep);
+      }
+    }
+
+    return {
+      success: true,
+      message: `成功將 ${toArchive.length} 筆超過 40 天的歷史紀錄移至「日誌歷史資料」分頁。`
+    };
+  } catch (error) {
+    Logger.log('archiveOldLogs error: ' + error.toString());
+    return { success: false, message: error.toString() };
+  }
+}
