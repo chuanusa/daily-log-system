@@ -366,7 +366,7 @@ function initGoogleSignIn() {
     });
     google.accounts.id.renderButton(
       document.getElementById("googleSignInButton"),
-      { theme: "outline", size: "large", width: "100%", text: "signin_with" }
+      { theme: "outline", size: "large", width: 250, text: "signin_with" }
     );
   } else {
     setTimeout(initGoogleSignIn, 500); // Wait for external script to load
