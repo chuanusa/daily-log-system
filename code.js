@@ -206,43 +206,16 @@ const CONFIG = {
 // ============================================
 // 初始化與基礎函數
 // ============================================
-function doPost(e) {
-  try {
-    let postData = {};
-    if (e.postData && e.postData.contents) {
-      postData = JSON.parse(e.postData.contents);
-    } else if (e.parameter && e.parameter.data) {
-      postData = JSON.parse(e.parameter.data);
-    }
-
-    const action = postData.action;
-    const args = postData.args || [];
-
-    const globalObj = this;
-
-    if (typeof globalObj[action] === 'function') {
-      const result = globalObj[action].apply(globalObj, args);
-      return ContentService.createTextOutput(JSON.stringify({
-        status: 'success',
-        data: result
-      })).setMimeType(ContentService.MimeType.JSON);
-    } else {
-      return ContentService.createTextOutput(JSON.stringify({
-        status: 'error',
-        message: '找不到對應的函數: ' + action
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-  } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({
-      status: 'error',
-      message: error.toString(),
-      stack: error.stack
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
+function doGet() {
+  return HtmlService.createTemplateFromFile('Index')
+    .evaluate()
+    .setTitle('綜合施工處 每日工程日誌系統')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-function doGet(e) {
-  return ContentService.createTextOutput("API is running.").setMimeType(ContentService.MimeType.TEXT);
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
 function getSheet(name) {
@@ -308,79 +281,6 @@ function getUserRole() {
 
 function validateUserPermission(email, projectSeqNo) {
   return true;
-}
-
-// ============================================
-// Google 登入驗證
-// ============================================
-function authenticateGoogleUser(email) {
-  try {
-    const fillerSheet = getSheet(CONFIG.SHEET_NAMES.FILLERS);
-    const data = fillerSheet.getDataRange().getValues();
-    const cols = CONFIG.FILLER_COLS;
-
-    Logger.log('=== Google 登入驗證開始 ===');
-    Logger.log('Google 信箱: ' + email);
-
-    // 從第2行開始（第1行是標題）
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-
-      // 讀取D欄（信箱）
-      const rowEmail = row[cols.EMAIL] ? row[cols.EMAIL].toString().trim() : '';
-
-      // 跳過空行
-      if (!rowEmail) continue;
-
-      // 不區分大小寫比對信箱
-      if (rowEmail.toLowerCase() === email.trim().toLowerCase()) {
-        Logger.log('✓ 找到匹配的信箱，自動登入');
-
-        const rowAccount = row[cols.ACCOUNT] ? row[cols.ACCOUNT].toString().trim() : '';
-
-        // 解析管理工程序號為陣列
-        const managedProjectsStr = row[cols.MANAGED_PROJECTS] || '';
-        const managedProjectsArray = managedProjectsStr ?
-          managedProjectsStr.split(',').map(p => p.trim()).filter(p => p) : [];
-
-        // 取得使用者權限
-        const permissions = getUserPermissions(rowEmail);
-
-        const userSession = {
-          isLoggedIn: true,
-          account: rowAccount || '',
-          email: rowEmail,
-          name: row[cols.NAME] || '未命名',
-          role: row[cols.ROLE] || CONFIG.ROLES.FILLER,
-          dept: row[cols.DEPT] || '未分類',
-          managedProjects: managedProjectsArray,
-          supervisorEmail: row[cols.SUPERVISOR_EMAIL] || '',
-          permissions: permissions,
-          loginTime: new Date().toISOString()
-        };
-
-        PropertiesService.getUserProperties().setProperty('userSession', JSON.stringify(userSession));
-
-        return {
-          success: true,
-          message: 'Google 登入成功！歡迎 ' + userSession.name,
-          user: userSession
-        };
-      }
-    }
-
-    Logger.log('✗ 找不到匹配的信箱');
-    return {
-      success: false,
-      message: '找不到此信箱，請確認您是否使用公司信箱，或請管理員將您加入系統'
-    };
-  } catch (error) {
-    Logger.log('authenticateGoogleUser error: ' + error.toString());
-    return {
-      success: false,
-      message: 'Google 登入失敗：' + error.message
-    };
-  }
 }
 
 // ============================================
@@ -3824,89 +3724,88 @@ function sendDailyContactReminder() {
 }
 
 // ============================================
-// 每月儀表板數據統計
+// 儀表板數據統計
 // ============================================
-function getMonthlyDashboardData(year, month) {
-  try {
-    const logSheet = getSheet(CONFIG.SHEET_NAMES.DAILY_LOG_DB);
-    const data = logSheet.getDataRange().getValues();
-    const cols = CONFIG.DAILY_LOG_COLS;
+function getDashboardData() {
+  const today = new Date();
+  const dateString = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 
-    // 專案名稱對照 Map
-    const projectSheet = getSheet(CONFIG.SHEET_NAMES.PROJECT_INFO);
-    const projData = projectSheet.getDataRange().getValues();
-    const projCols = CONFIG.PROJECT_COLS;
-    const projectNames = {};
-    for (let i = 1; i < projData.length; i++) {
-      const seq = projData[i][projCols.SEQ_NO];
-      if (seq) projectNames[seq] = projData[i][projCols.SHORT_NAME] || projData[i][projCols.FULL_NAME];
+  // 1. 取得今日總表
+  const summary = getDailySummaryReport(dateString, 'all', 'all', 'all', false, getCurrentSession());
+
+  // 2. 統計數據
+  const stats = {
+    date: dateString,
+    totalProjects: summary.length,
+    filledCount: summary.filter(r => r.hasFilled).length,
+    holidayNoWorkCount: summary.filter(r => r.isHolidayNoWork).length,
+
+    // 部門統計
+    byDept: {},
+
+    // 災害類型統計 (Top 5)
+    byDisaster: {}
+  };
+
+  summary.forEach(row => {
+    // 部門統計
+    if (!stats.byDept[row.dept]) {
+      stats.byDept[row.dept] = { total: 0, filled: 0 };
     }
+    stats.byDept[row.dept].total++;
+    if (row.hasFilled) stats.byDept[row.dept].filled++;
 
-    const workDaysMap = {}; // { seqNo: Set(dates) }
-    const hazardStats = {}; // { type: count }
-
-    // 遍歷所有日誌
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      if (!row[cols.DATE]) continue;
-
-      const d = new Date(row[cols.DATE]);
-      if (d.getFullYear() === year && (d.getMonth() + 1) === month) {
-
-        const seqNo = row[cols.PROJECT_SEQ_NO];
-        const workItem = row[cols.WORK_ITEM];
-        const dateStr = Utilities.formatDate(d, 'GMT+8', 'yyyy-MM-dd');
-
-        // 統計出工日數 (排除假日不施工)
-        if (workItem !== '假日不施工' && seqNo) {
-          if (!workDaysMap[seqNo]) {
-            workDaysMap[seqNo] = new Set();
-          }
-          workDaysMap[seqNo].add(dateStr);
-
-          // 統計危害類型
-          const disasterStr = row[cols.DISASTER_TYPES];
-          if (disasterStr) {
-            const types = disasterStr.toString().split(/[,、]/); // 支援 comma or dunhao
-            types.forEach(t => {
-              const type = t.trim();
-              if (type && type !== '無' && type !== '未填寫') {
-                hazardStats[type] = (hazardStats[type] || 0) + 1;
-              }
-            });
-          }
+    // 災害統計
+    if (row.hasFilled && row.workItems) {
+      row.workItems.forEach(item => {
+        if (item.disasters && Array.isArray(item.disasters)) {
+          item.disasters.forEach(d => {
+            if (d !== '無' && d !== '未填寫') {
+              const keys = d.split('、');
+              keys.forEach(k => {
+                stats.byDisaster[k] = (stats.byDisaster[k] || 0) + 1;
+              });
+            }
+          });
         }
-      }
-    }
-
-    // 轉換出工日數為陣列
-    const workDaysResult = [];
-    for (const seq in workDaysMap) {
-      workDaysResult.push({
-        seqNo: seq,
-        name: projectNames[seq] || seq,
-        days: workDaysMap[seq].size
       });
     }
+  });
 
-    // 排序：出工日數由多到少
-    workDaysResult.sort((a, b) => b.days - a.days);
+  return stats;
+}
 
-    // 轉換危害統計為陣列
-    const hazardResult = Object.keys(hazardStats).map(key => ({
-      type: key,
-      count: hazardStats[key]
-    })).sort((a, b) => b.count - a.count);
+// ==========================================
+// API Endpoint (Frontend -> Backend)
+// ==========================================
+function doPost(e) {
+  try {
+    const postData = JSON.parse(e.postData.contents);
+    const action = postData.action;
+    const args = postData.args || [];
 
-    return {
-      workDays: workDaysResult,
-      hazards: hazardResult,
-      year: year,
-      month: month
-    };
-
-  } catch (e) {
-    Logger.log('getMonthlyDashboardData error: ' + e.toString());
-    return { error: e.toString() };
+    // 檢查是否有這個函數
+    if (typeof this[action] === 'function') {
+      const result = this[action].apply(this, args);
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'success',
+        data: result
+      })).setMimeType(ContentService.MimeType.JSON);
+    } else {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'error',
+        message: 'Function not found: ' + action
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'error',
+      message: error.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+function doOptions(e) {
+  return ContentService.createTextOutput("")
+    .setMimeType(ContentService.MimeType.TEXT);
 }
