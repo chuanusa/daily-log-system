@@ -3809,3 +3809,46 @@ function doOptions(e) {
   return ContentService.createTextOutput("")
     .setMimeType(ContentService.MimeType.TEXT);
 }
+
+// ==========================================
+// Google Sign-In backend verification
+// ==========================================
+function authenticateGoogleUser(email) {
+  try {
+    const fillerSheet = getSheet(CONFIG.SHEET_NAMES.FILLERS);
+    const fillerData = fillerSheet.getDataRange().getValues();
+    const emailIndex = CONFIG.FILLER_COLS.EMAIL;
+
+    // 尋找符合該 Email 的使用者
+    for (let i = 1; i < fillerData.length; i++) {
+      if (fillerData[i][emailIndex] === email) {
+        // 取得使用者資訊
+        const user = {
+          account: fillerData[i][CONFIG.FILLER_COLS.ACCOUNT],
+          name: fillerData[i][CONFIG.FILLER_COLS.NAME],
+          role: fillerData[i][CONFIG.FILLER_COLS.ROLE],
+          email: fillerData[i][CONFIG.FILLER_COLS.EMAIL],
+          dept: fillerData[i][CONFIG.FILLER_COLS.DEPT],
+          managedProjects: fillerData[i][CONFIG.FILLER_COLS.MANAGED_PROJECTS] ? fillerData[i][CONFIG.FILLER_COLS.MANAGED_PROJECTS].toString().split(',') : []
+        };
+
+        return {
+          success: true,
+          message: 'Google 登入成功！',
+          user: user
+        };
+      }
+    }
+
+    return {
+      success: false,
+      message: '找不到此 Google 信箱對應的使用者，請聯絡管理員。'
+    };
+  } catch (error) {
+    Logger.log('authenticateGoogleUser error: ' + error.toString());
+    return {
+      success: false,
+      message: '系統發生錯誤: ' + error.toString()
+    };
+  }
+}
